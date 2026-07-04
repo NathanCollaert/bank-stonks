@@ -1,13 +1,13 @@
-package com.geportfolio;
+package com.stockpile;
 
 import net.runelite.client.RuneLite;
 import net.runelite.client.externalplugins.ExternalPluginManager;
 
-public class GePortfolioPluginTest
+public class StockpilePluginTest
 {
 	public static void main(String[] args) throws Exception
 	{
-		ExternalPluginManager.loadBuiltin(GePortfolioPlugin.class);
+		ExternalPluginManager.loadBuiltin(StockpilePlugin.class);
 		RuneLite.main(args);
 	}
 }

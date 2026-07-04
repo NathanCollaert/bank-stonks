@@ -1,4 +1,4 @@
-package com.geportfolio.model;
+package com.stockpile.model;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -23,6 +23,9 @@ public class TrackedItem
 
 	/** Total gp ever spent buying this item (GE fills + manual adds). */
 	private long totalSpent;
+
+	/** Epoch millis of the first recorded buy ("held since"); 0 if unknown. */
+	private long firstBoughtEpochMs;
 
 	/** Running average buy price, or 0 if nothing has been bought yet. */
 	public long averageBuyPrice()

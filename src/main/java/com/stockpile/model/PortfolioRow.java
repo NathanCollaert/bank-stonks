@@ -1,4 +1,4 @@
-package com.geportfolio.model;
+package com.stockpile.model;
 
 import lombok.Value;
 
@@ -25,6 +25,9 @@ public class PortfolioRow
 
 	/** Total profit/loss: profitEach * quantity. */
 	long profitTotal;
+
+	/** Epoch millis of the first recorded buy ("held since"); 0 if unknown. */
+	long firstBoughtEpochMs;
 
 	/** Profit as a percentage of the amount invested, or 0 if nothing invested. */
 	public double profitPercent()

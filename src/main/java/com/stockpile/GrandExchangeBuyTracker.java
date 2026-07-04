@@ -1,6 +1,6 @@
-package com.geportfolio;
+package com.stockpile;
 
-import com.geportfolio.model.SlotState;
+import com.stockpile.model.SlotState;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
@@ -78,6 +78,8 @@ public class GrandExchangeBuyTracker
 		boolean recorded = false;
 		if (deltaQty > 0 && deltaSpent > 0)
 		{
+			// Blocked items are still recorded in the background; they are only hidden from
+			// the list. Untracked items are simply absent and get recreated here on rebuy.
 			manager.recordBuy(itemId, deltaQty, deltaSpent);
 			recorded = true;
 			log.debug("recorded buy: item={} qty={} spent={}", itemId, deltaQty, deltaSpent);

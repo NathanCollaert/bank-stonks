@@ -1,4 +1,4 @@
-package com.geportfolio.model;
+package com.stockpile.model;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;

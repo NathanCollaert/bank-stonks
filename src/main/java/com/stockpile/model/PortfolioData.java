@@ -1,4 +1,4 @@
-package com.geportfolio.model;
+package com.stockpile.model;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -6,6 +6,9 @@ import lombok.Data;
 
 /**
  * The full persisted state for one account. Serialized to the RuneLite config as JSON.
+ *
+ * <p>The block list is not stored here — it lives in the plugin config (global, editable in
+ * settings) as item names.</p>
  */
 @Data
 public class PortfolioData
