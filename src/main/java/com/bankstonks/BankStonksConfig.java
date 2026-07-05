@@ -105,7 +105,7 @@ public interface BankStonksConfig extends Config
 	@ConfigItem(
 		keyName = KEY_BLOCK_LIST,
 		name = "Block list",
-		description = "Comma-separated item names that are never shown in the list (they are still tracked in the background). Use * as a wildcard, e.g. 'prayer potion*' matches all doses.",
+		description = "Comma-separated item names that are never shown in the list (they are still tracked in the background). A name with no * must match exactly; a name with a * matches any item containing that text, e.g. '*potion*' blocks all potions and 'prayer potion*' blocks all doses.",
 		position = 9
 	)
 	default String blockList()

@@ -140,7 +140,14 @@ public class BankStonksPanel extends PluginPanel
 		addToggle.setText(addExpanded ? "[-] Add item manually" : "[+] Add item manually");
 		addToggle.addActionListener(e -> toggleAddForm());
 
+		styleField(nameField);
+		styleField(qtyField);
+		styleField(priceField);
+		styleField(heldSinceField);
+
 		nameField.setToolTipText("Item name");
+		JPanel nameLabeled = labeled("Item", nameField);
+
 		JPanel qtyPrice = new JPanel(new GridLayout(1, 2, 4, 0));
 		qtyPrice.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		qtyField.setToolTipText("Quantity");
@@ -163,14 +170,14 @@ public class BankStonksPanel extends PluginPanel
 		addBody.setVisible(addExpanded);
 
 		stretch(addToggle);
-		stretch(nameField);
+		stretch(nameLabeled);
 		stretch(qtyPrice);
 		stretch(heldSince);
 		stretch(addBtn);
 		stretch(statusLabel);
 
 		addBody.add(Box.createVerticalStrut(6));
-		addBody.add(nameField);
+		addBody.add(nameLabeled);
 		addBody.add(Box.createVerticalStrut(4));
 		addBody.add(qtyPrice);
 		addBody.add(Box.createVerticalStrut(4));
@@ -184,6 +191,16 @@ public class BankStonksPanel extends PluginPanel
 		form.add(addToggle);
 		form.add(addBody);
 		return form;
+	}
+
+	private void styleField(JTextField field)
+	{
+		field.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		field.setForeground(Color.WHITE);
+		field.setCaretColor(Color.WHITE);
+		field.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR),
+			BorderFactory.createEmptyBorder(2, 4, 2, 4)));
 	}
 
 	private void toggleAddForm()
@@ -265,11 +282,8 @@ public class BankStonksPanel extends PluginPanel
 			return;
 		}
 
+		// Fields are cleared only on success, via clearManualEntry() from the plugin.
 		actions.addManual(name, qty, price, heldSince);
-		nameField.setText("");
-		qtyField.setText("");
-		priceField.setText("");
-		heldSinceField.setText("");
 	}
 
 	/** Shows a transient status message under the add form. Thread-safe. */
@@ -279,6 +293,18 @@ public class BankStonksPanel extends PluginPanel
 		{
 			statusLabel.setText(message == null || message.isEmpty() ? " " : message);
 			statusLabel.setForeground(color);
+		});
+	}
+
+	/** Clears the manual-add fields. Called only after a successful add. Thread-safe. */
+	public void clearManualEntry()
+	{
+		SwingUtilities.invokeLater(() ->
+		{
+			nameField.setText("");
+			qtyField.setText("");
+			priceField.setText("");
+			heldSinceField.setText("");
 		});
 	}
 

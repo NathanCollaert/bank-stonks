@@ -8,16 +8,21 @@ import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.time.temporal.ChronoUnit;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.Item;
+import net.runelite.api.ItemContainer;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GrandExchangeOfferChanged;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.WidgetClosed;
 import net.runelite.api.events.WidgetLoaded;
+import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -151,7 +156,9 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
-		if (bankTracker.handle(event))
+		boolean bankChanged = bankTracker.handle(event);
+		int id = event.getContainerId();
+		if (bankChanged || id == InventoryID.INV || id == InventoryID.WORN)
 		{
 			refresh();
 		}
@@ -191,9 +198,35 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 				return;
 			}
 
-			List<PortfolioRow> rows = manager.buildRows(itemManager, config);
+			List<PortfolioRow> rows = manager.buildRows(itemManager, config, liveHeldQuantities());
 			panel.update(rows, manager.getLastTotalProfit());
 		});
+	}
+
+	/** Live item quantities from the inventory and worn-equipment containers (client thread). */
+	private Map<Integer, Integer> liveHeldQuantities()
+	{
+		Map<Integer, Integer> out = new HashMap<>();
+		addContainer(out, InventoryID.INV);
+		addContainer(out, InventoryID.WORN);
+		return out;
+	}
+
+	private void addContainer(Map<Integer, Integer> out, int containerId)
+	{
+		ItemContainer container = client.getItemContainer(containerId);
+		if (container == null)
+		{
+			return;
+		}
+		for (Item item : container.getItems())
+		{
+			if (item == null || item.getId() <= 0 || item.getQuantity() <= 0)
+			{
+				continue;
+			}
+			out.merge(item.getId(), item.getQuantity(), Integer::sum);
+		}
 	}
 
 	// ---- PortfolioActions (invoked from the panel on the EDT) ----------------
@@ -222,6 +255,7 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 			manager.recordBuy(itemId, quantity, priceEach * quantity, heldSinceEpochMs);
 			manager.save();
 			panel.setStatus("Added " + quantity + " x " + name + ".", Color.LIGHT_GRAY);
+			panel.clearManualEntry();
 			refresh();
 		});
 	}

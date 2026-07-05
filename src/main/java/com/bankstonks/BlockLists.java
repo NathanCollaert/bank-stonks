@@ -59,7 +59,7 @@ final class BlockLists
 		String lower = itemName.toLowerCase(Locale.ROOT);
 		for (Pattern pattern : patterns)
 		{
-			if (pattern.matcher(lower).matches())
+			if (pattern.matcher(lower).find())
 			{
 				return true;
 			}
@@ -86,7 +86,15 @@ final class BlockLists
 
 	private static Pattern toPattern(String entry)
 	{
-		StringBuilder regex = new StringBuilder("^");
+		// Entries with a wildcard match as "contains" (unanchored), so "* potion" also
+		// matches "Divine super combat potion(4)". Entries without a wildcard are anchored,
+		// so they only match the exact item name.
+		boolean wildcard = entry.indexOf('*') >= 0;
+		StringBuilder regex = new StringBuilder();
+		if (!wildcard)
+		{
+			regex.append('^');
+		}
 		String[] parts = entry.split("\\*", -1);
 		for (int i = 0; i < parts.length; i++)
 		{
@@ -99,7 +107,10 @@ final class BlockLists
 				regex.append(Pattern.quote(parts[i]));
 			}
 		}
-		regex.append('$');
+		if (!wildcard)
+		{
+			regex.append('$');
+		}
 		return Pattern.compile(regex.toString());
 	}
 

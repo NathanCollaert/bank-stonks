@@ -230,20 +230,31 @@ public class PortfolioManager
 	}
 
 	/**
-	 * Builds the rows to render. Held quantity is min(totalBought, bank quantity) so that
-	 * items obtained outside the GE (drops, etc.) are never valued as profit, and sold-off
-	 * stock drops out automatically.
+	 * Builds the rows to render. Held quantity is min(totalBought, held) so that items
+	 * obtained outside the GE (drops, etc.) are never valued as profit, and sold-off stock
+	 * drops out automatically.
+	 *
+	 * <p>Held counts the bank snapshot plus the live inventory/equipment quantities passed in
+	 * (an item is only ever in one container, so there is no double counting).</p>
 	 *
 	 * <p>Must be called on the client thread (uses {@link ItemManager}).</p>
 	 */
-	public List<PortfolioRow> buildRows(ItemManager itemManager, BankStonksConfig config)
+	public List<PortfolioRow> buildRows(ItemManager itemManager, BankStonksConfig config, Map<Integer, Integer> liveQuantities)
 	{
-		// Total bank quantity grouped by variation base, so a charged/banked item counts
+		// Total held quantity grouped by variation base, so a charged/banked item counts
 		// towards the uncharged item it was bought as (and dose variants collapse together).
-		Map<Integer, Integer> bankByBase = new HashMap<>();
+		// Bank is a cached snapshot; inventory and worn items are live.
+		Map<Integer, Integer> heldByBase = new HashMap<>();
 		for (Map.Entry<Integer, Integer> e : data.getBank().entrySet())
 		{
-			bankByBase.merge(ItemVariationMapping.map(e.getKey()), e.getValue(), Integer::sum);
+			heldByBase.merge(ItemVariationMapping.map(e.getKey()), e.getValue(), Integer::sum);
+		}
+		if (liveQuantities != null)
+		{
+			for (Map.Entry<Integer, Integer> e : liveQuantities.entrySet())
+			{
+				heldByBase.merge(ItemVariationMapping.map(e.getKey()), e.getValue(), Integer::sum);
+			}
 		}
 
 		List<PortfolioRow> rows = new ArrayList<>();
@@ -263,8 +274,8 @@ public class PortfolioManager
 				continue;
 			}
 
-			int bankQty = bankByBase.getOrDefault(ItemVariationMapping.map(itemId), 0);
-			int quantity = Math.min(tracked.getTotalBought(), bankQty);
+			int heldQty = heldByBase.getOrDefault(ItemVariationMapping.map(itemId), 0);
+			int quantity = Math.min(tracked.getTotalBought(), heldQty);
 			if (quantity <= 0 && config.hideEmpty())
 			{
 				continue;
