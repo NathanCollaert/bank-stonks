@@ -22,12 +22,22 @@ public class PortfolioData
 	/** Last-seen GE offer state keyed by slot index (0-7). */
 	private Map<Integer, SlotState> slots = new HashMap<>();
 
+	/** Monotonic counter for assigning lot ids to GE offers. */
+	private long nextLotId;
+
 	/** Guards against null maps after deserializing older/partial JSON. */
 	public void ensureInitialized()
 	{
 		if (items == null)
 		{
 			items = new HashMap<>();
+		}
+		for (TrackedItem item : items.values())
+		{
+			if (item != null)
+			{
+				item.ensureInitialized();
+			}
 		}
 		if (bank == null)
 		{

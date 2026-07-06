@@ -5,6 +5,7 @@ import net.runelite.client.config.Alpha;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
+import net.runelite.client.config.ConfigSection;
 
 @ConfigGroup(BankStonksConfig.GROUP)
 public interface BankStonksConfig extends Config
@@ -12,22 +13,40 @@ public interface BankStonksConfig extends Config
 	String GROUP = "bankstonks";
 	String KEY_BLOCK_LIST = "blockList";
 
-	@ConfigItem(
-		keyName = "hideEmpty",
-		name = "Hide items not held",
-		description = "Hide tracked items you no longer have any of in your bank.",
+	@ConfigSection(
+		name = "Display",
+		description = "How the sidebar list is shown.",
+		position = 0
+	)
+	String SECTION_DISPLAY = "display";
+
+	@ConfigSection(
+		name = "Bank overlay",
+		description = "Profit/loss drawn on your bank slots.",
 		position = 1
 	)
-	default boolean hideEmpty()
-	{
-		return true;
-	}
+	String SECTION_OVERLAY = "overlay";
+
+	@ConfigSection(
+		name = "Colours",
+		description = "Colours for gains and losses.",
+		position = 2
+	)
+	String SECTION_COLOURS = "colours";
+
+	@ConfigSection(
+		name = "Block list",
+		description = "Items to hide from the list.",
+		position = 3
+	)
+	String SECTION_BLOCK_LIST = "blockListSection";
 
 	@ConfigItem(
 		keyName = "showPercent",
 		name = "Show profit %",
 		description = "Show the profit/loss as a percentage of the amount invested.",
-		position = 2
+		section = SECTION_DISPLAY,
+		position = 1
 	)
 	default boolean showPercent()
 	{
@@ -38,7 +57,8 @@ public interface BankStonksConfig extends Config
 		keyName = "sortOrder",
 		name = "Sort by",
 		description = "How to order the items in the panel.",
-		position = 3
+		section = SECTION_DISPLAY,
+		position = 2
 	)
 	default SortOrder sortOrder()
 	{
@@ -46,36 +66,27 @@ public interface BankStonksConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "bankOverlay",
-		name = "Show P/L on bank items",
-		description = "Draw each tracked item's profit/loss directly on its slot in the bank.",
-		position = 4
-	)
-	default boolean bankOverlay()
-	{
-		return true;
-	}
-
-	@ConfigItem(
-		keyName = "bankTotalOverlay",
-		name = "Show total on bank",
-		description = "Draw the total portfolio profit/loss as an overlay while the bank is open.",
-		position = 5
-	)
-	default boolean bankTotalOverlay()
-	{
-		return true;
-	}
-
-	@ConfigItem(
 		keyName = "applyGeTax",
 		name = "Subtract GE tax",
 		description = "Value holdings at what you would net after the 2% GE sell tax (capped at 5M per item) instead of the raw wiki price.",
-		position = 6
+		section = SECTION_DISPLAY,
+		position = 3
 	)
 	default boolean applyGeTax()
 	{
 		return false;
+	}
+
+	@ConfigItem(
+		keyName = "bankOverlay",
+		name = "Show bank overlay",
+		description = "Draw each tracked item's profit/loss directly on its slot in the bank.",
+		section = SECTION_OVERLAY,
+		position = 1
+	)
+	default boolean bankOverlay()
+	{
+		return true;
 	}
 
 	@Alpha
@@ -83,7 +94,8 @@ public interface BankStonksConfig extends Config
 		keyName = "profitColor",
 		name = "Profit colour",
 		description = "Colour used for a gain.",
-		position = 7
+		section = SECTION_COLOURS,
+		position = 1
 	)
 	default Color profitColor()
 	{
@@ -95,7 +107,8 @@ public interface BankStonksConfig extends Config
 		keyName = "lossColor",
 		name = "Loss colour",
 		description = "Colour used for a loss.",
-		position = 8
+		section = SECTION_COLOURS,
+		position = 2
 	)
 	default Color lossColor()
 	{
@@ -106,7 +119,8 @@ public interface BankStonksConfig extends Config
 		keyName = KEY_BLOCK_LIST,
 		name = "Block list",
 		description = "Comma-separated item names that are never shown in the list (they are still tracked in the background). A name with no * must match exactly; a name with a * matches any item containing that text, e.g. '*potion*' blocks all potions and 'prayer potion*' blocks all doses.",
-		position = 9
+		section = SECTION_BLOCK_LIST,
+		position = 1
 	)
 	default String blockList()
 	{

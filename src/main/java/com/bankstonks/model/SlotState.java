@@ -19,4 +19,7 @@ public class SlotState
 	private int itemId;
 	private int quantitySold;
 	private long spent;
+
+	/** The lot id this offer accumulates into, so its partial fills group into one lot. */
+	private long lotId;
 }

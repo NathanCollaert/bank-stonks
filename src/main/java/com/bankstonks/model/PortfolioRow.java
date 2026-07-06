@@ -1,5 +1,6 @@
 package com.bankstonks.model;
 
+import java.util.List;
 import lombok.Value;
 
 /**
@@ -14,7 +15,7 @@ public class PortfolioRow
 	/** min(totalBought, current bank quantity) — the amount we value. */
 	int quantity;
 
-	/** Running average buy price. */
+	/** Average price paid for the valued units (most-recent lots). */
 	long averageBuyPrice;
 
 	/** Current wiki (GE) price. */
@@ -28,6 +29,9 @@ public class PortfolioRow
 
 	/** Epoch millis of the first recorded buy ("held since"); 0 if unknown. */
 	long firstBoughtEpochMs;
+
+	/** The individual buy lots (newest first), for the expandable history. */
+	List<Lot> lots;
 
 	/** Profit as a percentage of the amount invested, or 0 if nothing invested. */
 	public double profitPercent()

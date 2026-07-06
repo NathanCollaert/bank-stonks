@@ -1,5 +1,6 @@
 package com.bankstonks;
 
+import com.bankstonks.model.LotValuation;
 import com.bankstonks.model.TrackedItem;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
@@ -56,7 +57,7 @@ public class BankOverlay extends WidgetItemOverlay
 		}
 
 		TrackedItem tracked = manager.getTracked(boughtId);
-		if (tracked == null || tracked.getTotalBought() <= 0)
+		if (tracked == null || tracked.totalBought() <= 0)
 		{
 			return;
 		}
@@ -77,20 +78,21 @@ public class BankOverlay extends WidgetItemOverlay
 			return;
 		}
 
-		int quantity = Math.min(tracked.getTotalBought(), widgetItem.getQuantity());
+		int quantity = Math.min(tracked.totalBought(), widgetItem.getQuantity());
 		if (quantity <= 0)
 		{
 			return;
 		}
 
-		long avg = tracked.averageBuyPrice();
+		LotValuation valuation = tracked.value(quantity);
+		long avg = valuation.getAveragePrice();
 		int rawCurrent = itemManager.getItemPrice(boughtId);
 		long current = config.applyGeTax() ? PortfolioManager.netAfterTax(rawCurrent) : rawCurrent;
 		long profit = (current - avg) * quantity;
 
 		java.awt.Color plColor = profit >= 0 ? config.profitColor() : config.lossColor();
 
-		String heldAge = Format.age(tracked.getFirstBoughtEpochMs());
+		String heldAge = Format.age(valuation.getHeldSinceEpochMs());
 		String heldLine = heldAge.isEmpty() ? "" : "Held: " + heldAge + "</br>";
 
 		String text = quantity + " @ " + Format.plain(avg) + " ea</br>"

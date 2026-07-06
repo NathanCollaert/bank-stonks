@@ -1,5 +1,7 @@
 package com.bankstonks;
 
+import com.bankstonks.model.Lot;
+import com.bankstonks.model.LotValuation;
 import com.bankstonks.model.PortfolioData;
 import com.bankstonks.model.PortfolioRow;
 import com.bankstonks.model.SlotState;
@@ -121,18 +123,10 @@ public class PortfolioManager
 
 	// ---- cost basis ----------------------------------------------------------
 
-	/** Records a buy (GE fill) against the running cost basis, stamped with the current time. */
-	public void recordBuy(int itemId, int quantity, long spent)
-	{
-		recordBuy(itemId, quantity, spent, 0L);
-	}
-
 	/**
-	 * Records a buy against the running cost basis.
+	 * Records a manual buy as a standalone lot.
 	 *
-	 * @param heldSinceEpochMs an explicit "held since" time (manual entry); if &gt; 0 it sets
-	 *                         the held-since date, otherwise the current time is used only when
-	 *                         no date has been recorded yet.
+	 * @param heldSinceEpochMs the purchase time for this lot; if &le; 0 the current time is used.
 	 */
 	public void recordBuy(int itemId, int quantity, long spent, long heldSinceEpochMs)
 	{
@@ -140,16 +134,26 @@ public class PortfolioManager
 		{
 			return;
 		}
-		TrackedItem tracked = data.getItems().computeIfAbsent(itemId, id -> new TrackedItem());
-		if (heldSinceEpochMs > 0)
+		long epochMs = heldSinceEpochMs > 0 ? heldSinceEpochMs : System.currentTimeMillis();
+		data.getItems().computeIfAbsent(itemId, id -> new TrackedItem()).addBuy(quantity, spent, epochMs);
+	}
+
+	/** Records a GE fill, grouping the partial fills of one offer into a single lot. */
+	public void recordOfferFill(int itemId, int quantity, long spent, long epochMs, long offerId)
+	{
+		if (quantity <= 0 || spent <= 0)
 		{
-			tracked.setFirstBoughtEpochMs(heldSinceEpochMs);
+			return;
 		}
-		else if (tracked.getFirstBoughtEpochMs() == 0)
-		{
-			tracked.setFirstBoughtEpochMs(System.currentTimeMillis());
-		}
-		tracked.addBuy(quantity, spent);
+		data.getItems().computeIfAbsent(itemId, id -> new TrackedItem()).addOfferFill(offerId, quantity, spent, epochMs);
+	}
+
+	/** Returns a fresh lot id for a newly-seen GE offer. */
+	public long nextOfferId()
+	{
+		long id = data.getNextLotId() + 1;
+		data.setNextLotId(id);
+		return id;
 	}
 
 	public TrackedItem getTracked(int itemId)
@@ -164,6 +168,33 @@ public class PortfolioManager
 	public void removeItem(int itemId)
 	{
 		data.getItems().remove(itemId);
+	}
+
+	/**
+	 * Removes a single buy lot (matched by quantity, spent and date). If it was the last lot,
+	 * the whole item is dropped.
+	 */
+	public void removeLot(int itemId, int quantity, long spent, long epochMs)
+	{
+		TrackedItem tracked = data.getItems().get(itemId);
+		if (tracked == null)
+		{
+			return;
+		}
+		List<Lot> lots = tracked.getLots();
+		for (int i = 0; i < lots.size(); i++)
+		{
+			Lot lot = lots.get(i);
+			if (lot.getQuantity() == quantity && lot.getSpent() == spent && lot.getEpochMs() == epochMs)
+			{
+				lots.remove(i);
+				break;
+			}
+		}
+		if (lots.isEmpty())
+		{
+			data.getItems().remove(itemId);
+		}
 	}
 
 	/**
@@ -263,7 +294,7 @@ public class PortfolioManager
 		{
 			int itemId = entry.getKey();
 			TrackedItem tracked = entry.getValue();
-			if (tracked.getTotalBought() <= 0)
+			if (tracked.totalBought() <= 0)
 			{
 				continue;
 			}
@@ -275,20 +306,27 @@ public class PortfolioManager
 			}
 
 			int heldQty = heldByBase.getOrDefault(ItemVariationMapping.map(itemId), 0);
-			int quantity = Math.min(tracked.getTotalBought(), heldQty);
-			if (quantity <= 0 && config.hideEmpty())
+			int quantity = Math.min(tracked.totalBought(), heldQty);
+			// The list only shows what you currently hold (bank + inventory + gear); items you
+			// have none of drop off until they come back.
+			if (quantity <= 0)
 			{
 				continue;
 			}
 
-			long avg = tracked.averageBuyPrice();
+			// Value the held units at the most recent purchases (LIFO).
+			LotValuation valuation = tracked.value(quantity);
+			long avg = valuation.getAveragePrice();
 			int rawCurrent = itemManager.getItemPrice(itemId);
 			long effectiveCurrent = config.applyGeTax() ? netAfterTax(rawCurrent) : rawCurrent;
 			long profitEach = effectiveCurrent - avg;
 			long profitTotal = profitEach * quantity;
 
+			List<Lot> lots = new ArrayList<>(tracked.getLots());
+			lots.sort(Comparator.comparingLong(Lot::getEpochMs).reversed());
+
 			total += profitTotal;
-			rows.add(new PortfolioRow(itemId, name, quantity, avg, rawCurrent, profitEach, profitTotal, tracked.getFirstBoughtEpochMs()));
+			rows.add(new PortfolioRow(itemId, name, quantity, avg, rawCurrent, profitEach, profitTotal, valuation.getHeldSinceEpochMs(), lots));
 		}
 
 		sort(rows, config.sortOrder());

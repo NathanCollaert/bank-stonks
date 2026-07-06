@@ -20,9 +20,9 @@ import net.runelite.api.ItemContainer;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GrandExchangeOfferChanged;
 import net.runelite.api.events.ItemContainerChanged;
-import net.runelite.api.events.WidgetClosed;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -70,8 +70,6 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 	private OverlayManager overlayManager;
 	@Inject
 	private BankOverlay bankOverlay;
-	@Inject
-	private BankTotalOverlay bankTotalOverlay;
 
 	private BankStonksPanel panel;
 	private NavigationButton navButton;
@@ -96,7 +94,6 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 			.build();
 		clientToolbar.addNavigation(navButton);
 		overlayManager.add(bankOverlay);
-		overlayManager.add(bankTotalOverlay);
 
 		refresh();
 	}
@@ -105,7 +102,6 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 	protected void shutDown() throws Exception
 	{
 		overlayManager.remove(bankOverlay);
-		overlayManager.remove(bankTotalOverlay);
 		clientToolbar.removeNavigation(navButton);
 		panel = null;
 		navButton = null;
@@ -119,28 +115,15 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 			manager.setAccount(client.getAccountHash());
 			refresh();
 		}
-		else
-		{
-			bankTotalOverlay.setBankOpen(false);
-		}
 	}
 
 	@Subscribe
 	public void onWidgetLoaded(WidgetLoaded event)
 	{
+		// Refresh the panel when the bank opens (its contents may have changed while closed).
 		if (event.getGroupId() == BANK_GROUP_ID)
 		{
-			bankTotalOverlay.setBankOpen(true);
 			refresh();
-		}
-	}
-
-	@Subscribe
-	public void onWidgetClosed(WidgetClosed event)
-	{
-		if (event.getGroupId() == BANK_GROUP_ID)
-		{
-			bankTotalOverlay.setBankOpen(false);
 		}
 	}
 
@@ -203,13 +186,32 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 		});
 	}
 
-	/** Live item quantities from the inventory and worn-equipment containers (client thread). */
+	/**
+	 * Live item quantities from the inventory, worn equipment and the Dizana's quiver (client
+	 * thread). The quiver holds equipped ammunition in its own container, separate from the worn
+	 * slots, so it must be counted too or quivered ammo would drop out of the list.
+	 */
 	private Map<Integer, Integer> liveHeldQuantities()
 	{
 		Map<Integer, Integer> out = new HashMap<>();
 		addContainer(out, InventoryID.INV);
 		addContainer(out, InventoryID.WORN);
+		addQuiver(out);
 		return out;
+	}
+
+	/**
+	 * Adds the ammunition stored in a Dizana's quiver. The quiver keeps its ammo in varplayers
+	 * rather than an item container, so it is not covered by {@link #addContainer}.
+	 */
+	private void addQuiver(Map<Integer, Integer> out)
+	{
+		int ammoId = client.getVarpValue(VarPlayerID.DIZANAS_QUIVER_TEMP_AMMO);
+		int ammoQty = client.getVarpValue(VarPlayerID.DIZANAS_QUIVER_TEMP_AMMO_AMOUNT);
+		if (ammoId > 0 && ammoQty > 0)
+		{
+			out.merge(itemManager.canonicalize(ammoId), ammoQty, Integer::sum);
+		}
 	}
 
 	private void addContainer(Map<Integer, Integer> out, int containerId)
@@ -225,7 +227,8 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 			{
 				continue;
 			}
-			out.merge(item.getId(), item.getQuantity(), Integer::sum);
+			// Canonicalize so a noted (or placeholder) item counts as the real item it was bought as.
+			out.merge(itemManager.canonicalize(item.getId()), item.getQuantity(), Integer::sum);
 		}
 	}
 
@@ -266,6 +269,17 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 		clientThread.invokeLater(() ->
 		{
 			manager.removeItem(itemId);
+			manager.save();
+			refresh();
+		});
+	}
+
+	@Override
+	public void untrackLot(int itemId, int quantity, long spent, long epochMs)
+	{
+		clientThread.invokeLater(() ->
+		{
+			manager.removeLot(itemId, quantity, spent, epochMs);
 			manager.save();
 			refresh();
 		});

@@ -2,20 +2,28 @@ package com.bankstonks.ui;
 
 import com.bankstonks.Format;
 import com.bankstonks.BankStonksConfig;
+import com.bankstonks.model.Lot;
 import com.bankstonks.model.PortfolioRow;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
 import java.awt.GridLayout;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.swing.BorderFactory;
@@ -68,6 +76,11 @@ public class BankStonksPanel extends PluginPanel
 	private final JLabel emptyLabel = new JLabel("<html><center>No tracked items yet.<br>Buy on the GE or add one above.</center></html>", SwingConstants.CENTER);
 
 	private List<PortfolioRow> allRows = new ArrayList<>();
+
+	/** Item ids whose buy-history dropdown is expanded. */
+	private final Set<Integer> expandedItems = new HashSet<>();
+
+	private static final DateTimeFormatter LOT_DATE = DateTimeFormatter.ofPattern("d MMM yy", Locale.ENGLISH);
 
 	public BankStonksPanel(ItemManager itemManager, BankStonksConfig config, PortfolioActions actions)
 	{
@@ -365,15 +378,23 @@ public class BankStonksPanel extends PluginPanel
 
 	private JPanel buildRow(PortfolioRow row)
 	{
-		JPanel panel = new JPanel(new BorderLayout(6, 0));
-		panel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		panel.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 4));
+		boolean collapsible = row.getLots() != null && row.getLots().size() > 1;
+		boolean expanded = collapsible && expandedItems.contains(row.getItemId());
+
+		JPanel container = new JPanel();
+		container.setLayout(new BoxLayout(container, BoxLayout.Y_AXIS));
+		container.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		container.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		JPanel main = new JPanel(new BorderLayout(6, 0));
+		main.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		main.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 4));
 
 		JLabel icon = new JLabel();
 		icon.setPreferredSize(new Dimension(32, 32));
 		AsyncBufferedImage image = itemManager.getImage(row.getItemId(), row.getQuantity(), row.getQuantity() > 1);
 		image.addTo(icon);
-		panel.add(icon, BorderLayout.WEST);
+		main.add(icon, BorderLayout.WEST);
 
 		String age = Format.age(row.getFirstBoughtEpochMs());
 		String heldText = age.isEmpty() ? "" : "held " + age;
@@ -385,8 +406,13 @@ public class BankStonksPanel extends PluginPanel
 		JLabel detail = new JLabel(row.getQuantity() + " @ " + Format.plain(row.getAverageBuyPrice()));
 		detail.setFont(FontManager.getRunescapeSmallFont());
 		detail.setForeground(Color.GRAY);
+		detail.setToolTipText(Format.exact(row.getAverageBuyPrice()) + " gp each");
+		// Wrap so the price tooltip only covers the text, not the whole row width.
+		JPanel detailWrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+		detailWrap.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		detailWrap.add(detail);
 		middle.add(name);
-		middle.add(detail);
+		middle.add(detailWrap);
 		if (!heldText.isEmpty())
 		{
 			JLabel held = new JLabel(heldText);
@@ -394,7 +420,7 @@ public class BankStonksPanel extends PluginPanel
 			held.setForeground(Color.GRAY.darker());
 			middle.add(held);
 		}
-		panel.add(middle, BorderLayout.CENTER);
+		main.add(middle, BorderLayout.CENTER);
 
 		JPanel plInfo = new JPanel(new GridLayout(config.showPercent() ? 2 : 1, 1));
 		plInfo.setBackground(ColorScheme.DARKER_GRAY_COLOR);
@@ -409,25 +435,173 @@ public class BankStonksPanel extends PluginPanel
 			pct.setForeground(colorFor(row.getProfitTotal()));
 			plInfo.add(pct);
 		}
-		panel.add(plInfo, BorderLayout.EAST);
+		main.add(plInfo, BorderLayout.EAST);
 
-		// Right-click a row for untrack (delete data; reappears if rebought) or block (never
-		// show; still tracked in the background).
+		// Right-click the item to untrack (delete all its history; reappears if rebought) or
+		// block (never show; still tracked in the background).
 		JPopupMenu popup = new JPopupMenu();
 		JMenuItem untrack = new JMenuItem("Untrack " + row.getName());
-		untrack.setToolTipText("Remove now; reappears with fresh data if bought again");
+		untrack.setToolTipText("Remove all history for this item; reappears if bought again");
 		untrack.addActionListener(e -> actions.untrackItem(row.getItemId()));
 		JMenuItem block = new JMenuItem("Block " + row.getName());
 		block.setToolTipText("Never show; still tracked in the background. Undo in settings.");
 		block.addActionListener(e -> actions.blockItem(row.getName()));
 		popup.add(untrack);
 		popup.add(block);
-		panel.setComponentPopupMenu(popup);
-		inheritPopup(panel);
+		main.setComponentPopupMenu(popup);
+		inheritPopup(main);
 
-		panel.setAlignmentX(Component.LEFT_ALIGNMENT);
-		panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, panel.getPreferredSize().height));
-		return panel;
+		// The whole row is clickable when there is buy history to expand: hover highlights it and
+		// a left click toggles the history dropdown.
+		if (collapsible)
+		{
+			main.setToolTipText(row.getLots().size() + " buys, click to " + (expanded ? "hide" : "show") + " history");
+			MouseAdapter rowMouse = new MouseAdapter()
+			{
+				@Override
+				public void mouseEntered(MouseEvent e)
+				{
+					setRowBackground(main, ColorScheme.DARKER_GRAY_HOVER_COLOR);
+				}
+
+				@Override
+				public void mouseExited(MouseEvent e)
+				{
+					if (main.getMousePosition() == null)
+					{
+						setRowBackground(main, ColorScheme.DARKER_GRAY_COLOR);
+					}
+				}
+
+				@Override
+				public void mousePressed(MouseEvent e)
+				{
+					if (SwingUtilities.isLeftMouseButton(e))
+					{
+						toggleExpanded(row.getItemId());
+					}
+				}
+			};
+			addMouseListenerDeep(main, rowMouse, Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		}
+
+		stretch(main);
+		container.add(main);
+
+		if (expanded)
+		{
+			for (Lot lot : row.getLots())
+			{
+				container.add(buildLotRow(row.getItemId(), lot));
+			}
+		}
+
+		container.setMaximumSize(new Dimension(Integer.MAX_VALUE, container.getPreferredSize().height));
+		return container;
+	}
+
+	/** A single buy in the expanded history: quantity, unit price and date, right-click to remove. */
+	private JPanel buildLotRow(int itemId, Lot lot)
+	{
+		JPanel row = new JPanel(new BorderLayout(6, 0));
+		row.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		// A left accent marks it as a nested history entry; the inset lines it up under the name.
+		row.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createMatteBorder(0, 3, 0, 0, ColorScheme.MEDIUM_GRAY_COLOR),
+			BorderFactory.createEmptyBorder(6, 23, 6, 6)));
+
+		JLabel info = new JLabel(lot.getQuantity() + " @ " + Format.plain(lot.unitPrice()));
+		info.setFont(FontManager.getRunescapeSmallFont());
+		info.setForeground(Color.LIGHT_GRAY);
+		info.setToolTipText(Format.exact(lot.unitPrice()) + " gp each");
+		row.add(info, BorderLayout.WEST);
+
+		JLabel date = new JLabel(formatDate(lot.getEpochMs()), SwingConstants.RIGHT);
+		date.setFont(FontManager.getRunescapeSmallFont());
+		date.setForeground(Color.GRAY);
+		row.add(date, BorderLayout.EAST);
+
+		JPopupMenu popup = new JPopupMenu();
+		JMenuItem untrack = new JMenuItem("Remove this buy");
+		untrack.addActionListener(e -> actions.untrackLot(itemId, lot.getQuantity(), lot.getSpent(), lot.getEpochMs()));
+		popup.add(untrack);
+		row.setComponentPopupMenu(popup);
+		inheritPopup(row);
+
+		// Hover highlight signals the row is interactive (right-click to remove).
+		MouseAdapter hover = new MouseAdapter()
+		{
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				setRowBackground(row, ColorScheme.DARK_GRAY_HOVER_COLOR);
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				if (row.getMousePosition() == null)
+				{
+					setRowBackground(row, ColorScheme.DARK_GRAY_COLOR);
+				}
+			}
+		};
+		addMouseListenerDeep(row, hover, null);
+
+		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
+		return row;
+	}
+
+	private void toggleExpanded(int itemId)
+	{
+		if (!expandedItems.remove(itemId))
+		{
+			expandedItems.add(itemId);
+		}
+		renderList();
+	}
+
+	static String formatDate(long epochMs)
+	{
+		if (epochMs <= 0)
+		{
+			return "";
+		}
+		return Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()).toLocalDate().format(LOT_DATE);
+	}
+
+	/** Recolors a row: sets the panel's background and that of any nested panels (labels are transparent). */
+	private static void setRowBackground(java.awt.Container row, Color color)
+	{
+		row.setBackground(color);
+		for (java.awt.Component child : row.getComponents())
+		{
+			if (child instanceof JPanel)
+			{
+				setRowBackground((java.awt.Container) child, color);
+			}
+		}
+	}
+
+	/**
+	 * Attaches a mouse listener to a row and every descendant so hover/click work anywhere on it,
+	 * and optionally applies a cursor to the whole row.
+	 */
+	private static void addMouseListenerDeep(java.awt.Component c, MouseAdapter adapter, Cursor cursor)
+	{
+		c.addMouseListener(adapter);
+		if (cursor != null)
+		{
+			c.setCursor(cursor);
+		}
+		if (c instanceof java.awt.Container)
+		{
+			for (java.awt.Component child : ((java.awt.Container) c).getComponents())
+			{
+				addMouseListenerDeep(child, adapter, cursor);
+			}
+		}
 	}
 
 	/** Lets a row's child components trigger the row's right-click menu too. */

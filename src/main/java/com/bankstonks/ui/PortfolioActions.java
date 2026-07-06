@@ -22,6 +22,9 @@ public interface PortfolioActions
 	 */
 	void untrackItem(int itemId);
 
+	/** Removes a single buy lot from an item's history (matched by quantity, spent and date). */
+	void untrackLot(int itemId, int quantity, long spent, long epochMs);
+
 	/**
 	 * Adds an item to the block list so it is never shown (it is still tracked in the
 	 * background). Reversible only by editing the block list in settings.

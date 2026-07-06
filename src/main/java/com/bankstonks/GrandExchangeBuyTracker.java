@@ -63,29 +63,30 @@ public class GrandExchangeBuyTracker
 		final int quantitySold = offer.getQuantitySold();
 		final long spent = offer.getSpent();
 
-		int prevQty = 0;
-		long prevSpent = 0;
 		SlotState prev = manager.getSlot(slot);
-		if (prev != null && prev.getItemId() == itemId && quantitySold >= prev.getQuantitySold())
-		{
-			prevQty = prev.getQuantitySold();
-			prevSpent = prev.getSpent();
-		}
+		boolean continuing = prev != null && prev.getItemId() == itemId && quantitySold >= prev.getQuantitySold();
+		int prevQty = continuing ? prev.getQuantitySold() : 0;
+		long prevSpent = continuing ? prev.getSpent() : 0;
 
 		int deltaQty = quantitySold - prevQty;
 		long deltaSpent = spent - prevSpent;
 
+		// Partial fills of the same offer accumulate into one lot; a new offer gets a fresh id.
+		long offerId = continuing ? prev.getLotId() : 0;
+
 		boolean recorded = false;
 		if (deltaQty > 0 && deltaSpent > 0)
 		{
-			// Blocked items are still recorded in the background; they are only hidden from
-			// the list. Untracked items are simply absent and get recreated here on rebuy.
-			manager.recordBuy(itemId, deltaQty, deltaSpent);
+			if (offerId == 0)
+			{
+				offerId = manager.nextOfferId();
+			}
+			manager.recordOfferFill(itemId, deltaQty, deltaSpent, System.currentTimeMillis(), offerId);
 			recorded = true;
-			log.debug("recorded buy: item={} qty={} spent={}", itemId, deltaQty, deltaSpent);
+			log.debug("recorded buy fill: item={} qty={} spent={} offer={}", itemId, deltaQty, deltaSpent, offerId);
 		}
 
-		manager.setSlot(slot, new SlotState(itemId, quantitySold, spent));
+		manager.setSlot(slot, new SlotState(itemId, quantitySold, spent, offerId));
 		manager.save();
 		return recorded;
 	}

@@ -29,6 +29,12 @@ public final class Format
 		return sign + abs;
 	}
 
+	/** Exact gp with thousands separators, e.g. "1,234,567". */
+	public static String exact(long value)
+	{
+		return String.format("%,d", value);
+	}
+
 	/** Unsigned compact gp, e.g. "1.23M", "450.0K", "999". */
 	public static String plain(long value)
 	{

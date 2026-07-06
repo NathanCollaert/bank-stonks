@@ -17,22 +17,38 @@ how those old purchases have actually panned out.
 ## How it works
 
 - Every time you **buy** something on the GE, Bank Stonks records the quantity and the *actual*
-  average price you paid (partial fills included).
-- Your **held quantity comes from your bank**, not from guessing. So selling, dropping,
-  alching or trading is reflected automatically the next time your bank updates.
-- Profit/loss for an item = **held quantity × (current wiki price − your average buy price)**.
-- Held quantity is capped at what you actually *bought* (`min(bought, in bank)`), so free
-  drops of an item you also bought never get counted as "profit".
+  price you paid (partial fills included).
+- Your **held quantity is whatever you currently have** in your bank, inventory and worn gear.
+  Selling, dropping, alching or using items is reflected as your holdings change.
+- Profit/loss for an item = **held quantity × (current wiki price − what you paid)**.
+- Held quantity is capped at what you actually *bought* (`min(bought, held)`), so free drops of
+  an item you also bought never get counted as "profit".
 - Charged/uncharged and dose variants are matched together, so buying an item uncharged,
   charging it, and banking the charged version still tracks correctly.
 
-## Good to know
+## Limitations
 
-- Bank Stonks can only record buys **from the moment it's installed**; the game doesn't expose
-  your old purchase history. Use **manual add** (with a Held-since date) to backfill older
-  holdings.
-- Category matching for charged/dose variants relies on RuneLite's item variation data, which
-  covers the common cases but not every single item.
+A few things to expect, so nothing looks like a bug:
+
+- **Items appear and disappear as your holdings change.** The list only shows what you're
+  currently holding. Sell an item, use it up, drop it, keep it in your POH, store it at a boss
+  reclaim, or lose it on death, and it drops off the list, then reappears the moment it's back
+  in your bank or inventory.
+- **Your buy history is never deleted.** Because an item can leave and come back (a withdrawal,
+  a death, boss/POH storage), nothing is removed when it disappears, so a returning item keeps
+  its original cost and "held since".
+- **Holdings are valued at your most recent buys.** If you've bought an item at different times,
+  what you hold is priced from the latest purchases first. Sell everything and rebuy later and
+  it shows the *new* price with a fresh "held since", not a blend with the old ones.
+- **Only buys are tracked, from install onward.** The game doesn't expose your past purchases,
+  so use **manual add** (with a Held-since date) to backfill items you bought before installing.
+- **Consumed supplies linger hidden.** If you buy food/potions/runes and use them up without
+  selling, the record stays but is hidden while you hold none; buying more shows the new price.
+- **Variant matching isn't exhaustive.** Charged/uncharged and dose variants are grouped via
+  RuneLite's item-variation data, which covers common cases but not every item.
+- **Only the 40 most recent buys are kept as separate history rows.** Beyond that, the oldest
+  buys are merged into a single rolled-up entry to keep stored data small. No quantity or spend
+  is ever lost, so totals and valuation stay exact; only the per-buy history is condensed.
 
 ## Presets
 
