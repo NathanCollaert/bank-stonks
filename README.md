@@ -18,13 +18,35 @@ how those old purchases have actually panned out.
 
 - Every time you **buy** something on the GE, Bank Stonks records the quantity and the *actual*
   price you paid (partial fills included).
-- Your **held quantity is whatever you currently have** in your bank, inventory and worn gear.
-  Selling, dropping, alching or using items is reflected as your holdings change.
+- Your **held quantity is whatever you currently have** in your bank, inventory, worn gear and
+  Dizana's quiver (noted items included). Selling, dropping, alching or using items is reflected
+  as your holdings change.
 - Profit/loss for an item = **held quantity × (current wiki price − what you paid)**.
 - Held quantity is capped at what you actually *bought* (`min(bought, held)`), so free drops of
   an item you also bought never get counted as "profit".
 - Charged/uncharged and dose variants are matched together, so buying an item uncharged,
   charging it, and banking the charged version still tracks correctly.
+- **Combined items count toward what you bought.** Hold an avernic defender and it still counts
+  as the hilt you purchased; the same goes for ornament-kitted gear, blood fury, and similar.
+- **Armour and item sets are supported.** Buy a set and unpack it, and the loose pieces still
+  count toward the set you paid for (every Grand Exchange set is covered). If you sell the set
+  and later rebuy the pieces individually, your most recent purchase is the one that counts.
+
+## Locking an item
+
+Sometimes you want to pin the profit/loss of one specific purchase and keep watching it, even
+after you have moved the item around. Right-click an item in the sidebar and choose **Lock** to
+pin it to its most recent buy, or expand its history and choose **Lock this buy** to pin a
+specific purchase.
+
+A locked item:
+
+- collapses to that single buy (its price, date and quantity become the fixed cost basis),
+- stays in the list even when you hold none of it,
+- keeps showing **live** profit/loss against the locked price as the market moves.
+
+Your full buy history keeps being tracked underneath the whole time. Right-click and choose
+**Unlock** to return the item to its normal, holdings-based view.
 
 ## Limitations
 
@@ -44,8 +66,9 @@ A few things to expect, so nothing looks like a bug:
   so use **manual add** (with a Held-since date) to backfill items you bought before installing.
 - **Consumed supplies linger hidden.** If you buy food/potions/runes and use them up without
   selling, the record stays but is hidden while you hold none; buying more shows the new price.
-- **Variant matching isn't exhaustive.** Charged/uncharged and dose variants are grouped via
-  RuneLite's item-variation data, which covers common cases but not every item.
+- **Variant matching isn't exhaustive.** Charged/uncharged and dose variants, combination items
+  and armour sets are matched using RuneLite's item data plus a small maintained list, which
+  covers the common cases but may miss an unusual assembled item.
 - **Only the 40 most recent buys are kept as separate history rows.** Beyond that, the oldest
   buys are merged into a single rolled-up entry to keep stored data small. No quantity or spend
   is ever lost, so totals and valuation stay exact; only the per-buy history is condensed.

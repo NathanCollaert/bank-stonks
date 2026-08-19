@@ -201,6 +201,36 @@ public class PortfolioManager
 		}
 	}
 
+	/** Locks an item to its most recent buy (pinning it, shown regardless of holdings). */
+	public void lockItem(int itemId)
+	{
+		TrackedItem tracked = data.getItems().get(itemId);
+		if (tracked != null)
+		{
+			tracked.lockToNewest();
+		}
+	}
+
+	/** Locks an item to a specific buy (matched by quantity, spent and date). */
+	public void lockLot(int itemId, int quantity, long spent, long epochMs)
+	{
+		TrackedItem tracked = data.getItems().get(itemId);
+		if (tracked != null)
+		{
+			tracked.lockToLot(quantity, spent, epochMs);
+		}
+	}
+
+	/** Removes the lock from an item. */
+	public void unlockItem(int itemId)
+	{
+		TrackedItem tracked = data.getItems().get(itemId);
+		if (tracked != null)
+		{
+			tracked.unlock();
+		}
+	}
+
 	/**
 	 * The tradeable "base" item ids a held item counts towards. Uses RuneLite's {@link ItemMapping}
 	 * (the same data {@link ItemManager#getItemPrice} sums) so a combination item resolves to the
@@ -361,7 +391,7 @@ public class PortfolioManager
 		List<Map.Entry<Integer, TrackedItem>> claims = new ArrayList<>();
 		for (Map.Entry<Integer, TrackedItem> entry : data.getItems().entrySet())
 		{
-			if (entry.getValue().totalBought() > 0)
+			if (!entry.getValue().isLocked() && entry.getValue().totalBought() > 0)
 			{
 				claims.add(entry);
 			}
@@ -374,6 +404,27 @@ public class PortfolioManager
 
 		List<PortfolioRow> rows = new ArrayList<>();
 		long total = 0;
+
+		// Locked items are pinned to one buy: always shown, valued at that lot's price/date/quantity,
+		// and excluded from the held-pool allocation below (their quantity is the locked lot's, not
+		// what you currently hold).
+		for (Map.Entry<Integer, TrackedItem> entry : data.getItems().entrySet())
+		{
+			TrackedItem tracked = entry.getValue();
+			if (!tracked.isLocked())
+			{
+				continue;
+			}
+			int itemId = entry.getKey();
+			if (isBlocked(config, itemManager.getItemComposition(itemId).getName()))
+			{
+				continue;
+			}
+			PortfolioRow row = buildLockedRow(itemManager, config, itemId, tracked);
+			rows.add(row);
+			total += row.getProfitTotal();
+		}
+
 		for (Map.Entry<Integer, TrackedItem> entry : claims)
 		{
 			int itemId = entry.getKey();
@@ -430,6 +481,57 @@ public class PortfolioManager
 		return rows;
 	}
 
+	/**
+	 * A cheap snapshot of the held quantities of just the tracked items (and set pieces), keyed by
+	 * variation base. Used to decide whether an inventory change actually affected the panel, so we
+	 * can skip a full rebuild when it did not. Does no pricing or row building.
+	 */
+	public Map<Integer, Integer> trackedHeldSignature(Map<Integer, Integer> liveQuantities)
+	{
+		if (data.getItems().isEmpty())
+		{
+			return new HashMap<>();
+		}
+
+		Set<Integer> relevant = new HashSet<>();
+		for (Integer id : data.getItems().keySet())
+		{
+			relevant.add(ItemVariationMapping.map(id));
+			int[] pieces = ItemSets.piecesFor(id);
+			if (pieces != null)
+			{
+				for (int piece : pieces)
+				{
+					relevant.add(ItemVariationMapping.map(piece));
+				}
+			}
+		}
+
+		Map<Integer, Integer> held = new HashMap<>();
+		for (Map.Entry<Integer, Integer> e : data.getBank().entrySet())
+		{
+			addHeld(held, e.getKey(), e.getValue());
+		}
+		if (liveQuantities != null)
+		{
+			for (Map.Entry<Integer, Integer> e : liveQuantities.entrySet())
+			{
+				addHeld(held, e.getKey(), e.getValue());
+			}
+		}
+
+		Map<Integer, Integer> signature = new HashMap<>();
+		for (Integer base : relevant)
+		{
+			int quantity = held.getOrDefault(base, 0);
+			if (quantity != 0)
+			{
+				signature.put(base, quantity);
+			}
+		}
+		return signature;
+	}
+
 	/** The most recent buy date across a tracked item's lots (0 if none). */
 	private static long newestBuy(TrackedItem tracked)
 	{
@@ -476,7 +578,24 @@ public class PortfolioManager
 		lots.sort(Comparator.comparingLong(Lot::getEpochMs).reversed());
 
 		String name = itemManager.getItemComposition(itemId).getName();
-		return new PortfolioRow(itemId, name, quantity, avg, rawCurrent, profitEach, profitTotal, valuation.getHeldSinceEpochMs(), lots);
+		return new PortfolioRow(itemId, name, quantity, avg, rawCurrent, profitEach, profitTotal, valuation.getHeldSinceEpochMs(), lots, false);
+	}
+
+	/** Builds a pinned row for a locked item, valued at its locked lot's price, date and quantity. */
+	private PortfolioRow buildLockedRow(ItemManager itemManager, BankStonksConfig config, int itemId, TrackedItem tracked)
+	{
+		Lot locked = tracked.getLockedLot();
+		int quantity = locked.getQuantity();
+		long avg = locked.unitPrice();
+		int rawCurrent = itemManager.getItemPrice(itemId);
+		long effectiveCurrent = config.applyGeTax() ? netAfterTax(rawCurrent) : rawCurrent;
+		long profitEach = effectiveCurrent - avg;
+		long profitTotal = profitEach * quantity;
+
+		// A locked item shows no history dropdown (empty lots); the underlying lots are still kept
+		// and updated, and are restored when it is unlocked.
+		String name = itemManager.getItemComposition(itemId).getName();
+		return new PortfolioRow(itemId, name, quantity, avg, rawCurrent, profitEach, profitTotal, locked.getEpochMs(), new ArrayList<>(), true);
 	}
 
 	private static void sort(List<PortfolioRow> rows, SortOrder order)

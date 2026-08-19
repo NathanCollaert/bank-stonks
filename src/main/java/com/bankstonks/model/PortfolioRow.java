@@ -33,6 +33,9 @@ public class PortfolioRow
 	/** The individual buy lots (newest first), for the expandable history. */
 	List<Lot> lots;
 
+	/** Whether this item is locked (pinned to one buy, shown without a history dropdown). */
+	boolean locked;
+
 	/** Profit as a percentage of the amount invested, or 0 if nothing invested. */
 	public double profitPercent()
 	{

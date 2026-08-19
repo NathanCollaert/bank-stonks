@@ -25,12 +25,64 @@ public class TrackedItem
 
 	private List<Lot> lots = new ArrayList<>();
 
+	/**
+	 * A pinned buy. When set, the item is "locked": it is shown regardless of what you currently
+	 * hold and valued at this lot's price/date/quantity instead of the live LIFO holding. It is a
+	 * snapshot copy, so it survives lots being merged or removed. Null means unlocked.
+	 */
+	private Lot lockedLot;
+
 	public void ensureInitialized()
 	{
 		if (lots == null)
 		{
 			lots = new ArrayList<>();
 		}
+	}
+
+	public boolean isLocked()
+	{
+		return lockedLot != null;
+	}
+
+	/** Locks the item to its most recent buy. No-op if there are no lots. */
+	public void lockToNewest()
+	{
+		Lot newest = null;
+		for (Lot lot : lots)
+		{
+			if (newest == null || lot.getEpochMs() > newest.getEpochMs())
+			{
+				newest = lot;
+			}
+		}
+		if (newest != null)
+		{
+			lockedLot = copy(newest);
+		}
+	}
+
+	/** Locks the item to a specific buy (matched by quantity, spent and date). */
+	public void lockToLot(int quantity, long spent, long epochMs)
+	{
+		for (Lot lot : lots)
+		{
+			if (lot.getQuantity() == quantity && lot.getSpent() == spent && lot.getEpochMs() == epochMs)
+			{
+				lockedLot = copy(lot);
+				return;
+			}
+		}
+	}
+
+	public void unlock()
+	{
+		lockedLot = null;
+	}
+
+	private static Lot copy(Lot lot)
+	{
+		return new Lot(lot.getQuantity(), lot.getSpent(), lot.getEpochMs(), lot.getOfferId());
 	}
 
 	/** Records a standalone buy (e.g. a manual entry) as a new lot. */

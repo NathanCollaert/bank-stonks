@@ -82,6 +82,9 @@ public class BankStonksPanel extends PluginPanel
 
 	private static final DateTimeFormatter LOT_DATE = DateTimeFormatter.ofPattern("d MMM yy", Locale.ENGLISH);
 
+	/** Accent/text colour marking a locked (pinned) item or buy. */
+	private static final Color LOCK_COLOR = new Color(230, 185, 60);
+
 	public BankStonksPanel(ItemManager itemManager, BankStonksConfig config, PortfolioActions actions)
 	{
 		this.itemManager = itemManager;
@@ -398,6 +401,10 @@ public class BankStonksPanel extends PluginPanel
 
 		String age = Format.age(row.getFirstBoughtEpochMs());
 		String heldText = age.isEmpty() ? "" : "held " + age;
+		if (row.isLocked())
+		{
+			heldText = heldText.isEmpty() ? "locked" : heldText + " (locked)";
+		}
 		JPanel middle = new JPanel(new GridLayout(heldText.isEmpty() ? 2 : 3, 1));
 		middle.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		JLabel name = new JLabel(row.getName());
@@ -417,7 +424,7 @@ public class BankStonksPanel extends PluginPanel
 		{
 			JLabel held = new JLabel(heldText);
 			held.setFont(FontManager.getRunescapeSmallFont());
-			held.setForeground(Color.GRAY.darker());
+			held.setForeground(row.isLocked() ? LOCK_COLOR : Color.GRAY.darker());
 			middle.add(held);
 		}
 		main.add(middle, BorderLayout.CENTER);
@@ -440,6 +447,20 @@ public class BankStonksPanel extends PluginPanel
 		// Right-click the item to untrack (delete all its history; reappears if rebought) or
 		// block (never show; still tracked in the background).
 		JPopupMenu popup = new JPopupMenu();
+		if (row.isLocked())
+		{
+			JMenuItem unlock = new JMenuItem("Unlock " + row.getName());
+			unlock.setToolTipText("Stop pinning this item to a single buy");
+			unlock.addActionListener(e -> actions.unlockItem(row.getItemId()));
+			popup.add(unlock);
+		}
+		else
+		{
+			JMenuItem lock = new JMenuItem("Lock " + row.getName());
+			lock.setToolTipText("Pin this item to its most recent buy; stays shown even when you hold none");
+			lock.addActionListener(e -> actions.lockItem(row.getItemId()));
+			popup.add(lock);
+		}
 		JMenuItem untrack = new JMenuItem("Untrack " + row.getName());
 		untrack.setToolTipText("Remove all history for this item; reappears if bought again");
 		untrack.addActionListener(e -> actions.untrackItem(row.getItemId()));
@@ -500,7 +521,7 @@ public class BankStonksPanel extends PluginPanel
 		return container;
 	}
 
-	/** A single buy in the expanded history: quantity, unit price and date, right-click to remove. */
+	/** A single buy in the expanded history: quantity, unit price and date, right-click to lock/remove. */
 	private JPanel buildLotRow(int itemId, Lot lot)
 	{
 		JPanel row = new JPanel(new BorderLayout(6, 0));
@@ -521,7 +542,11 @@ public class BankStonksPanel extends PluginPanel
 		date.setForeground(Color.GRAY);
 		row.add(date, BorderLayout.EAST);
 
+		// Locking a specific buy pins the item to it; the item then collapses to that single buy.
 		JPopupMenu popup = new JPopupMenu();
+		JMenuItem lock = new JMenuItem("Lock this buy");
+		lock.addActionListener(e -> actions.lockLot(itemId, lot.getQuantity(), lot.getSpent(), lot.getEpochMs()));
+		popup.add(lock);
 		JMenuItem untrack = new JMenuItem("Remove this buy");
 		untrack.addActionListener(e -> actions.untrackLot(itemId, lot.getQuantity(), lot.getSpent(), lot.getEpochMs()));
 		popup.add(untrack);

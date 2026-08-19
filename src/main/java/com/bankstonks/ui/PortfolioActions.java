@@ -30,4 +30,13 @@ public interface PortfolioActions
 	 * background). Reversible only by editing the block list in settings.
 	 */
 	void blockItem(String itemName);
+
+	/** Locks an item to its most recent buy: pinned in the list and valued at that buy. */
+	void lockItem(int itemId);
+
+	/** Locks an item to a specific buy (matched by quantity, spent and date). */
+	void lockLot(int itemId, int quantity, long spent, long epochMs);
+
+	/** Removes an item's lock. */
+	void unlockItem(int itemId);
 }

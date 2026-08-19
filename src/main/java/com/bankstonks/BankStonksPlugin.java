@@ -5,6 +5,7 @@ import com.bankstonks.ui.BankStonksPanel;
 import com.bankstonks.ui.PortfolioActions;
 import com.google.inject.Provides;
 import java.awt.Color;
+import java.awt.event.HierarchyEvent;
 import java.awt.image.BufferedImage;
 import java.time.temporal.ChronoUnit;
 import java.util.Collections;
@@ -75,6 +76,24 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 	private BankStonksPanel panel;
 	private NavigationButton navButton;
 
+	/**
+	 * Set by any event that could change the panel; the actual rebuild happens at most once per
+	 * game tick and only while the sidebar is open. This coalesces the flood of inventory/bank
+	 * changes during normal play into a single refresh, and skips work entirely when the panel is
+	 * closed. (The bank overlay reads live data on render and is unaffected.)
+	 */
+	private volatile boolean refreshPending;
+
+	/**
+	 * When true the next rebuild is unconditional (something other than inventory changed: an edit,
+	 * a config change, the price timer, opening the panel). Inventory changes leave this false, so
+	 * they only rebuild when the tracked items' held quantities actually changed.
+	 */
+	private volatile boolean forceRebuild;
+
+	/** The tracked items' held quantities at the last rebuild, to detect real changes. */
+	private Map<Integer, Integer> lastHeldSignature = new HashMap<>();
+
 	@Provides
 	BankStonksConfig provideConfig(ConfigManager configManager)
 	{
@@ -96,7 +115,17 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 		clientToolbar.addNavigation(navButton);
 		overlayManager.add(bankOverlay);
 
-		refresh();
+		// Rebuild once whenever the sidebar becomes visible (e.g. the user opens the tab), so it
+		// shows current data without us having to rebuild it while it was hidden.
+		panel.addHierarchyListener(e ->
+		{
+			if ((e.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0 && panel.isShowing())
+			{
+				requestForceRefresh();
+			}
+		});
+
+		requestForceRefresh();
 	}
 
 	@Override
@@ -119,8 +148,10 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 		}
 		if (state == GameState.LOGGED_IN)
 		{
+			// Load the account immediately (the bank overlay needs it), but leave the panel
+			// rebuild to the coalesced tick handler.
 			manager.setAccount(client.getAccountHash());
-			refresh();
+			requestForceRefresh();
 		}
 	}
 
@@ -129,15 +160,30 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 	{
 		// The login/hop offer replay all fires before the first tick, so the sync window is over.
 		buyTracker.setLoginSync(false);
+
+		// Coalesce all the refresh requests since the last tick, and only bother while the sidebar
+		// is open. An inventory-only request rebuilds only if a tracked item's held quantity has
+		// actually changed; edits / config / the price timer force it regardless.
+		if (refreshPending && panel != null && panel.isShowing())
+		{
+			refreshPending = false;
+			Map<Integer, Integer> signature = manager.trackedHeldSignature(liveHeldQuantities());
+			if (forceRebuild || !signature.equals(lastHeldSignature))
+			{
+				forceRebuild = false;
+				lastHeldSignature = signature;
+				refresh();
+			}
+		}
 	}
 
 	@Subscribe
 	public void onWidgetLoaded(WidgetLoaded event)
 	{
-		// Refresh the panel when the bank opens (its contents may have changed while closed).
+		// The bank opening can change what counts as held; queue a refresh.
 		if (event.getGroupId() == BANK_GROUP_ID)
 		{
-			refresh();
+			requestForceRefresh();
 		}
 	}
 
@@ -146,7 +192,7 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 	{
 		if (buyTracker.handle(event))
 		{
-			refresh();
+			requestForceRefresh();
 		}
 	}
 
@@ -157,7 +203,7 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 		int id = event.getContainerId();
 		if (bankChanged || id == InventoryID.INV || id == InventoryID.WORN)
 		{
-			refresh();
+			requestRefresh();
 		}
 	}
 
@@ -166,14 +212,31 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 	{
 		if (BankStonksConfig.GROUP.equals(event.getGroup()))
 		{
-			refresh();
+			requestForceRefresh();
 		}
 	}
 
-	@Schedule(period = 30, unit = ChronoUnit.SECONDS)
+	@Schedule(period = 5, unit = ChronoUnit.MINUTES)
 	public void scheduledRefresh()
 	{
-		refresh();
+		// Picks up price changes while the panel sits open with nothing else happening.
+		requestForceRefresh();
+	}
+
+	/**
+	 * Marks the panel as needing a rebuild from an inventory change; the tick only rebuilds if a
+	 * tracked item's held quantity actually changed.
+	 */
+	private void requestRefresh()
+	{
+		refreshPending = true;
+	}
+
+	/** Requests an unconditional rebuild (used for edits, config, prices, opening the panel). */
+	private void requestForceRefresh()
+	{
+		forceRebuild = true;
+		refreshPending = true;
 	}
 
 	private void refresh()
@@ -304,6 +367,39 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 	{
 		configManager.setConfiguration(BankStonksConfig.GROUP, BankStonksConfig.KEY_BLOCK_LIST, BlockLists.add(config.blockList(), itemName));
 		refresh();
+	}
+
+	@Override
+	public void lockItem(int itemId)
+	{
+		clientThread.invokeLater(() ->
+		{
+			manager.lockItem(itemId);
+			manager.save();
+			refresh();
+		});
+	}
+
+	@Override
+	public void lockLot(int itemId, int quantity, long spent, long epochMs)
+	{
+		clientThread.invokeLater(() ->
+		{
+			manager.lockLot(itemId, quantity, spent, epochMs);
+			manager.save();
+			refresh();
+		});
+	}
+
+	@Override
+	public void unlockItem(int itemId)
+	{
+		clientThread.invokeLater(() ->
+		{
+			manager.unlockItem(itemId);
+			manager.save();
+			refresh();
+		});
 	}
 
 	/** Resolves a user-typed name to an item id, preferring an exact (case-insensitive) match. */
