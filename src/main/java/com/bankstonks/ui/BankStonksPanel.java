@@ -4,15 +4,23 @@ import com.bankstonks.Format;
 import com.bankstonks.BankStonksConfig;
 import com.bankstonks.model.Lot;
 import com.bankstonks.model.PortfolioRow;
+import java.awt.AlphaComposite;
+import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Graphics2D;
 import java.awt.GridLayout;
+import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.geom.Arc2D;
+import java.awt.geom.Ellipse2D;
+import java.awt.geom.RoundRectangle2D;
+import java.awt.image.BufferedImage;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
@@ -35,6 +43,7 @@ import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
+import javax.swing.ImageIcon;
 import javax.swing.JTextField;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
@@ -82,8 +91,35 @@ public class BankStonksPanel extends PluginPanel
 
 	private static final DateTimeFormatter LOT_DATE = DateTimeFormatter.ofPattern("d MMM yy", Locale.ENGLISH);
 
-	/** Accent/text colour marking a locked (pinned) item or buy. */
+	/** Accent colour marking a locked (pinned) item or buy. */
 	private static final Color LOCK_COLOR = new Color(230, 185, 60);
+
+	/** Small gold padlock shown next to a locked item's held line. */
+	private static final ImageIcon LOCK_ICON = buildLockIcon();
+
+	private static ImageIcon buildLockIcon()
+	{
+		int w = 7;
+		int lock = 9;
+		// JLabel centres the icon on the font's line box, which sits below the small font's visible
+		// glyphs, so transparent space below the padlock lifts it up onto the text's centre.
+		int bottomPad = 4;
+		int h = lock + bottomPad;
+		BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+		Graphics2D g = img.createGraphics();
+		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+		g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+		g.setColor(LOCK_COLOR);
+		g.setStroke(new BasicStroke(1.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+		g.draw(new Arc2D.Double(1.6, 1.0, w - 3.2, 5.5, 0, 180, Arc2D.OPEN));
+		g.fill(new RoundRectangle2D.Double(0.5, 3.5, w - 1.0, lock - 3.5, 1.8, 1.8));
+		// Punch a keyhole so it reads as a lock.
+		g.setComposite(AlphaComposite.Clear);
+		g.fill(new Ellipse2D.Double(w / 2.0 - 0.8, 4.9, 1.6, 1.6));
+		g.setComposite(AlphaComposite.SrcOver);
+		g.dispose();
+		return new ImageIcon(img);
+	}
 
 	public BankStonksPanel(ItemManager itemManager, BankStonksConfig config, PortfolioActions actions)
 	{
@@ -401,15 +437,20 @@ public class BankStonksPanel extends PluginPanel
 
 		String age = Format.age(row.getFirstBoughtEpochMs());
 		String heldText = age.isEmpty() ? "" : "held " + age;
-		if (row.isLocked())
-		{
-			heldText = heldText.isEmpty() ? "locked" : heldText + " (locked)";
-		}
 		JPanel middle = new JPanel(new GridLayout(heldText.isEmpty() ? 2 : 3, 1));
 		middle.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		JLabel name = new JLabel(row.getName());
 		name.setFont(FontManager.getRunescapeSmallFont());
 		name.setForeground(Color.WHITE);
+		if (row.isLocked())
+		{
+			// A small gold padlock in front of the name marks the item as locked.
+			name.setIcon(LOCK_ICON);
+			name.setIconTextGap(4);
+			name.setVerticalAlignment(SwingConstants.CENTER);
+			name.setVerticalTextPosition(SwingConstants.CENTER);
+			name.setToolTipText("Locked to this buy");
+		}
 		JLabel detail = new JLabel(row.getQuantity() + " @ " + Format.plain(row.getAverageBuyPrice()));
 		detail.setFont(FontManager.getRunescapeSmallFont());
 		detail.setForeground(Color.GRAY);
@@ -424,22 +465,25 @@ public class BankStonksPanel extends PluginPanel
 		{
 			JLabel held = new JLabel(heldText);
 			held.setFont(FontManager.getRunescapeSmallFont());
-			held.setForeground(row.isLocked() ? LOCK_COLOR : Color.GRAY.darker());
+			held.setForeground(Color.GRAY.darker());
 			middle.add(held);
 		}
 		main.add(middle, BorderLayout.CENTER);
 
 		JPanel plInfo = new JPanel(new GridLayout(config.showPercent() ? 2 : 1, 1));
 		plInfo.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		String currentTip = Format.exact(row.getCurrentPrice()) + " gp each";
 		JLabel pl = new JLabel(Format.gp(row.getProfitTotal()), SwingConstants.RIGHT);
 		pl.setFont(FontManager.getRunescapeSmallFont());
 		pl.setForeground(colorFor(row.getProfitTotal()));
+		pl.setToolTipText(currentTip);
 		plInfo.add(pl);
 		if (config.showPercent())
 		{
 			JLabel pct = new JLabel(String.format("%+.1f%%", row.profitPercent()), SwingConstants.RIGHT);
 			pct.setFont(FontManager.getRunescapeSmallFont());
 			pct.setForeground(colorFor(row.getProfitTotal()));
+			pct.setToolTipText(currentTip);
 			plInfo.add(pct);
 		}
 		main.add(plInfo, BorderLayout.EAST);

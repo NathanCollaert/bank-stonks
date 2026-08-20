@@ -37,7 +37,7 @@ import net.runelite.client.game.ItemVariationMapping;
 public class PortfolioManager
 {
 	static final String CONFIG_GROUP = "bankstonks";
-	private static final String DATA_KEY_PREFIX = "data_";
+	static final String DATA_KEY_PREFIX = "data_";
 
 	private final ConfigManager configManager;
 	private final Gson gson;

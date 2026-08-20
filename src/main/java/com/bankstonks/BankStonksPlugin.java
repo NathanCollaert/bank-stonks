@@ -210,7 +210,10 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event)
 	{
-		if (BankStonksConfig.GROUP.equals(event.getGroup()))
+		// Only react to actual setting changes. Our own portfolio saves land in the same config
+		// group under the data_ key; those must not force a rebuild or every bank change and GE buy
+		// (which call save()) would rebuild the whole panel.
+		if (BankStonksConfig.GROUP.equals(event.getGroup()) && !event.getKey().startsWith(PortfolioManager.DATA_KEY_PREFIX))
 		{
 			requestForceRefresh();
 		}
