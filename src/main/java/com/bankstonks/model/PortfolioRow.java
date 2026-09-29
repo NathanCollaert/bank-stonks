@@ -19,7 +19,7 @@ public class PortfolioRow
 	long averageBuyPrice;
 
 	/** Current wiki (GE) price. */
-	int currentPrice;
+	long currentPrice;
 
 	/** Profit/loss per single item: currentPrice - averageBuyPrice. */
 	long profitEach;

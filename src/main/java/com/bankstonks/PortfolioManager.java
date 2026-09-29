@@ -345,7 +345,7 @@ public class PortfolioManager
 	 * Items priced under 50 are tax-exempt. Buys are never taxed, so this only ever adjusts
 	 * the current price side of the profit calculation.
 	 */
-	public static long netAfterTax(int price)
+	public static long netAfterTax(long price)
 	{
 		if (price < 50)
 		{
@@ -569,7 +569,7 @@ public class PortfolioManager
 	{
 		LotValuation valuation = tracked.value(quantity);
 		long avg = valuation.getAveragePrice();
-		int rawCurrent = itemManager.getItemPrice(itemId);
+		long rawCurrent = itemManager.getItemPrice(itemId);
 		long effectiveCurrent = config.applyGeTax() ? netAfterTax(rawCurrent) : rawCurrent;
 		long profitEach = effectiveCurrent - avg;
 		long profitTotal = profitEach * quantity;
@@ -587,7 +587,7 @@ public class PortfolioManager
 		Lot locked = tracked.getLockedLot();
 		int quantity = locked.getQuantity();
 		long avg = locked.unitPrice();
-		int rawCurrent = itemManager.getItemPrice(itemId);
+		long rawCurrent = itemManager.getItemPrice(itemId);
 		long effectiveCurrent = config.applyGeTax() ? netAfterTax(rawCurrent) : rawCurrent;
 		long profitEach = effectiveCurrent - avg;
 		long profitTotal = profitEach * quantity;
@@ -610,7 +610,7 @@ public class PortfolioManager
 				comparator = Comparator.comparingLong(PortfolioRow::getProfitTotal);
 				break;
 			case HIGHEST_VALUE:
-				comparator = Comparator.comparingLong((PortfolioRow r) -> (long) r.getCurrentPrice() * r.getQuantity()).reversed();
+				comparator = Comparator.comparingLong((PortfolioRow r) -> r.getCurrentPrice() * r.getQuantity()).reversed();
 				break;
 			case NAME:
 				comparator = Comparator.comparing(r -> r.getName().toLowerCase());

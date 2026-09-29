@@ -27,13 +27,20 @@ dependencies {
 }
 
 group = 'com.bankstonks'
-version = '2.4.1'
+version = '2.4.2'
 
 def pluginMainClass = 'com.bankstonks.BankStonksPluginTest'
 
 tasks.withType(JavaCompile).configureEach {
 	options.encoding = 'UTF-8'
 	options.release.set(11)
+	// Surface deprecated/removed RuneLite APIs while they still compile, so they can be replaced
+	// before a client update removes them. CI passes -PstrictCompat to turn these into failures.
+	options.compilerArgs += ['-Xlint:deprecation', '-Xlint:removal']
+	if (project.hasProperty('strictCompat'))
+	{
+		options.compilerArgs += '-Werror'
+	}
 }
 
 tasks.register('run', JavaExec) {

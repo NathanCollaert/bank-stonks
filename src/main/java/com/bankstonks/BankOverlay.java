@@ -86,7 +86,7 @@ public class BankOverlay extends WidgetItemOverlay
 
 		LotValuation valuation = tracked.value(quantity);
 		long avg = valuation.getAveragePrice();
-		int rawCurrent = itemManager.getItemPrice(boughtId);
+		long rawCurrent = itemManager.getItemPrice(boughtId);
 		long current = config.applyGeTax() ? PortfolioManager.netAfterTax(rawCurrent) : rawCurrent;
 		long profit = (current - avg) * quantity;
 
