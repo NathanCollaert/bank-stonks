@@ -1,15 +1,12 @@
 package com.bankstonks;
 
-/**
- * Shared number/age formatting used by the panel and overlays.
- */
 public final class Format
 {
 	private Format()
 	{
 	}
 
-	/** Signed compact gp, e.g. "+1.23M", "-450.0K", "+999". */
+	/** Signed and compact, e.g. "+1.23M", "-450.0K". */
 	public static String gp(long value)
 	{
 		long abs = Math.abs(value);
@@ -29,15 +26,18 @@ public final class Format
 		return sign + abs;
 	}
 
-	/** Exact gp with thousands separators, e.g. "1,234,567". */
 	public static String exact(long value)
 	{
 		return String.format("%,d", value);
 	}
 
-	/** Unsigned compact gp, e.g. "1.23M", "450.0K", "999". */
+	/** Unsigned and compact, e.g. "1.23M", "450.0K". */
 	public static String plain(long value)
 	{
+		if (value >= 1_000_000_000L)
+		{
+			return String.format("%.2fB", value / 1_000_000_000.0);
+		}
 		if (value >= 1_000_000L)
 		{
 			return String.format("%.2fM", value / 1_000_000.0);
@@ -49,14 +49,14 @@ public final class Format
 		return Long.toString(value);
 	}
 
-	/** Bare "held since" age, e.g. "today", "12d", "5mo", "2y 3mo"; empty if unknown. */
-	public static String age(long firstBoughtEpochMs)
+	/** Empty when the time is unknown (0 or less). */
+	public static String age(long sinceEpochMs)
 	{
-		if (firstBoughtEpochMs <= 0)
+		if (sinceEpochMs <= 0)
 		{
 			return "";
 		}
-		long days = (System.currentTimeMillis() - firstBoughtEpochMs) / 86_400_000L;
+		long days = (System.currentTimeMillis() - sinceEpochMs) / 86_400_000L;
 		if (days <= 0)
 		{
 			return "today";

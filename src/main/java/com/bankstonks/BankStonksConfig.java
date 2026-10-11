@@ -12,6 +12,7 @@ public interface BankStonksConfig extends Config
 {
 	String GROUP = "bankstonks";
 	String KEY_BLOCK_LIST = "blockList";
+	String KEY_SORT_ORDER = "sortOrder";
 
 	@ConfigSection(
 		name = "Display",
@@ -54,7 +55,7 @@ public interface BankStonksConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "sortOrder",
+		keyName = KEY_SORT_ORDER,
 		name = "Sort by",
 		description = "How to order the items in the panel.",
 		section = SECTION_DISPLAY,

@@ -20,6 +20,8 @@ dependencies {
 
 	compileOnly 'org.projectlombok:lombok:1.18.30'
 	annotationProcessor 'org.projectlombok:lombok:1.18.30'
+	testCompileOnly 'org.projectlombok:lombok:1.18.30'
+	testAnnotationProcessor 'org.projectlombok:lombok:1.18.30'
 
 	testImplementation 'junit:junit:4.12'
 	testImplementation group: 'net.runelite', name:'client', version: runeLiteVersion
@@ -27,15 +29,14 @@ dependencies {
 }
 
 group = 'com.bankstonks'
-version = '2.4.2'
+version = '2.5.0'
 
 def pluginMainClass = 'com.bankstonks.BankStonksPluginTest'
 
 tasks.withType(JavaCompile).configureEach {
 	options.encoding = 'UTF-8'
 	options.release.set(11)
-	// Surface deprecated/removed RuneLite APIs while they still compile, so they can be replaced
-	// before a client update removes them. CI passes -PstrictCompat to turn these into failures.
+	// Catches deprecated RuneLite APIs before a client update removes them. CI builds with -PstrictCompat.
 	options.compilerArgs += ['-Xlint:deprecation', '-Xlint:removal']
 	if (project.hasProperty('strictCompat'))
 	{
@@ -49,6 +50,21 @@ tasks.register('run', JavaExec) {
 
 	jvmArgs "-ea"
 	args "--developer-mode", "--debug"
+}
+
+// A small heap lets the tests run next to an open dev client.
+tasks.named('test') {
+	maxHeapSize = '256m'
+}
+
+tasks.register('dev', JavaExec) {
+	group = 'application'
+	description = 'Launch a dev client with Bank Stonks, the UI watchdog and sidebar snapshots'
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = 'com.bankstonks.BankStonksDevLauncher'
+	// RuneLite refuses to load a builtin plugin without assertions on.
+	jvmArgs '-ea', '-Xmx1g'
+	args '--developer-mode', '--debug'
 }
 
 tasks.register('shadowJar', Jar) {

@@ -35,9 +35,9 @@ how those old purchases have actually panned out.
 ## Locking an item
 
 Sometimes you want to pin the profit/loss of one specific purchase and keep watching it, even
-after you have moved the item around. Right-click an item in the sidebar and choose **Lock** to
-pin it to its most recent buy, or expand its history and choose **Lock this buy** to pin a
-specific purchase.
+after you have moved the item around. Right-click an item in the sidebar and choose **Lock to
+latest buy** to pin it to its most recent buy, or click the item to unfold its history and
+right-click a buy to choose **Lock this buy**.
 
 A locked item:
 
@@ -63,7 +63,8 @@ A few things to expect, so nothing looks like a bug:
   what you hold is priced from the latest purchases first. Sell everything and rebuy later and
   it shows the *new* price with a fresh "held since", not a blend with the old ones.
 - **Only buys are tracked, from install onward.** The game doesn't expose your past purchases,
-  so use **manual add** (with a Held-since date) to backfill items you bought before installing.
+  so use the **+** button in the sidebar (with a Held-since date) to backfill items you bought
+  before installing.
 - **Consumed supplies linger hidden.** If you buy food/potions/runes and use them up without
   selling, the record stays but is hidden while you hold none; buying more shows the new price.
 - **Variant matching isn't exhaustive.** Charged/uncharged and dose variants, combination items

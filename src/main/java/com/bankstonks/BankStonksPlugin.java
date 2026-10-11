@@ -8,7 +8,6 @@ import java.awt.Color;
 import java.awt.event.HierarchyEvent;
 import java.awt.image.BufferedImage;
 import java.time.temporal.ChronoUnit;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -47,7 +46,6 @@ import net.runelite.http.api.item.ItemPrice;
 )
 public class BankStonksPlugin extends Plugin implements PortfolioActions
 {
-	/** The bank interface widget group id. */
 	private static final int BANK_GROUP_ID = 12;
 
 	@Inject
@@ -77,22 +75,14 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 	private NavigationButton navButton;
 
 	/**
-	 * Set by any event that could change the panel; the actual rebuild happens at most once per
-	 * game tick and only while the sidebar is open. This coalesces the flood of inventory/bank
-	 * changes during normal play into a single refresh, and skips work entirely when the panel is
-	 * closed. (The bank overlay reads live data on render and is unaffected.)
+	 * Rebuilds wait for the next game tick and an open sidebar, so the flood of container changes
+	 * during play costs one rebuild, or none while the panel is closed.
 	 */
 	private volatile boolean refreshPending;
 
-	/**
-	 * When true the next rebuild is unconditional (something other than inventory changed: an edit,
-	 * a config change, the price timer, opening the panel). Inventory changes leave this false, so
-	 * they only rebuild when the tracked items' held quantities actually changed.
-	 */
 	private volatile boolean forceRebuild;
 
-	/** The tracked items' held quantities at the last rebuild, to detect real changes. */
-	private Map<Integer, Integer> lastHeldSignature = new HashMap<>();
+	private Map<Integer, Integer> heldSignatureAtLastRebuild = new HashMap<>();
 
 	@Provides
 	BankStonksConfig provideConfig(ConfigManager configManager)
@@ -103,7 +93,7 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 	@Override
 	protected void startUp() throws Exception
 	{
-		panel = new BankStonksPanel(itemManager, config, this);
+		panel = new BankStonksPanel(itemManager::getImage, config, this);
 
 		final BufferedImage icon = ImageUtil.loadImageResource(getClass(), "/nav_button.png");
 		navButton = NavigationButton.builder()
@@ -115,15 +105,7 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 		clientToolbar.addNavigation(navButton);
 		overlayManager.add(bankOverlay);
 
-		// Rebuild once whenever the sidebar becomes visible (e.g. the user opens the tab), so it
-		// shows current data without us having to rebuild it while it was hidden.
-		panel.addHierarchyListener(e ->
-		{
-			if ((e.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0 && panel.isShowing())
-			{
-				requestForceRefresh();
-			}
-		});
+		panel.addHierarchyListener(this::refreshWhenShown);
 
 		requestForceRefresh();
 	}
@@ -137,19 +119,27 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 		navButton = null;
 	}
 
+	private void refreshWhenShown(HierarchyEvent event)
+	{
+		boolean showingChanged = (event.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0;
+		if (showingChanged && panel.isShowing())
+		{
+			requestForceRefresh();
+		}
+	}
+
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event)
 	{
 		GameState state = event.getGameState();
-		if (state == GameState.LOGGING_IN || state == GameState.HOPPING)
+		boolean offersAboutToReplay = state == GameState.LOGGING_IN || state == GameState.HOPPING;
+		if (offersAboutToReplay)
 		{
-			// The client is about to replay all existing GE offers; don't re-record them.
 			buyTracker.setLoginSync(true);
 		}
 		if (state == GameState.LOGGED_IN)
 		{
-			// Load the account immediately (the bank overlay needs it), but leave the panel
-			// rebuild to the coalesced tick handler.
+			// Now rather than at the next rebuild: the bank overlay needs the account loaded.
 			manager.setAccount(client.getAccountHash());
 			requestForceRefresh();
 		}
@@ -158,29 +148,30 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 	@Subscribe
 	public void onGameTick(GameTick event)
 	{
-		// The login/hop offer replay all fires before the first tick, so the sync window is over.
+		// The login/hop offer replay all arrives before the first tick.
 		buyTracker.setLoginSync(false);
 
-		// Coalesce all the refresh requests since the last tick, and only bother while the sidebar
-		// is open. An inventory-only request rebuilds only if a tracked item's held quantity has
-		// actually changed; edits / config / the price timer force it regardless.
 		if (refreshPending && panel != null && panel.isShowing())
 		{
 			refreshPending = false;
-			Map<Integer, Integer> signature = manager.trackedHeldSignature(liveHeldQuantities());
-			if (forceRebuild || !signature.equals(lastHeldSignature))
-			{
-				forceRebuild = false;
-				lastHeldSignature = signature;
-				refresh();
-			}
+			rebuildIfForcedOrHoldingsChanged();
+		}
+	}
+
+	private void rebuildIfForcedOrHoldingsChanged()
+	{
+		Map<Integer, Integer> signature = manager.trackedHeldSignature(liveHeldQuantities());
+		if (forceRebuild || !signature.equals(heldSignatureAtLastRebuild))
+		{
+			forceRebuild = false;
+			heldSignatureAtLastRebuild = signature;
+			refresh();
 		}
 	}
 
 	@Subscribe
 	public void onWidgetLoaded(WidgetLoaded event)
 	{
-		// The bank opening can change what counts as held; queue a refresh.
 		if (event.getGroupId() == BANK_GROUP_ID)
 		{
 			requestForceRefresh();
@@ -203,39 +194,40 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 		int id = event.getContainerId();
 		if (bankChanged || id == InventoryID.INV || id == InventoryID.WORN)
 		{
-			requestRefresh();
+			requestRefreshIfHoldingsChanged();
 		}
 	}
 
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event)
 	{
-		// Only react to actual setting changes. Our own portfolio saves land in the same config
-		// group under the data_ key; those must not force a rebuild or every bank change and GE buy
-		// (which call save()) would rebuild the whole panel.
-		if (BankStonksConfig.GROUP.equals(event.getGroup()) && !event.getKey().startsWith(PortfolioManager.DATA_KEY_PREFIX))
+		if (isSettingChange(event))
 		{
 			requestForceRefresh();
 		}
 	}
 
-	@Schedule(period = 5, unit = ChronoUnit.MINUTES)
-	public void scheduledRefresh()
+	private static boolean isSettingChange(ConfigChanged event)
 	{
-		// Picks up price changes while the panel sits open with nothing else happening.
+		return BankStonksConfig.GROUP.equals(event.getGroup()) && !isPortfolioSave(event);
+	}
+
+	private static boolean isPortfolioSave(ConfigChanged event)
+	{
+		return event.getKey().startsWith(PortfolioManager.DATA_KEY_PREFIX);
+	}
+
+	@Schedule(period = 5, unit = ChronoUnit.MINUTES)
+	public void refreshPrices()
+	{
 		requestForceRefresh();
 	}
 
-	/**
-	 * Marks the panel as needing a rebuild from an inventory change; the tick only rebuilds if a
-	 * tracked item's held quantity actually changed.
-	 */
-	private void requestRefresh()
+	private void requestRefreshIfHoldingsChanged()
 	{
 		refreshPending = true;
 	}
 
-	/** Requests an unconditional rebuild (used for edits, config, prices, opening the panel). */
 	private void requestForceRefresh()
 	{
 		forceRebuild = true;
@@ -257,7 +249,7 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 
 			if (!manager.hasAccount())
 			{
-				panel.update(Collections.emptyList(), 0L);
+				panel.showLoggedOut();
 				return;
 			}
 
@@ -266,11 +258,7 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 		});
 	}
 
-	/**
-	 * Live item quantities from the inventory, worn equipment and the Dizana's quiver (client
-	 * thread). The quiver holds equipped ammunition in its own container, separate from the worn
-	 * slots, so it must be counted too or quivered ammo would drop out of the list.
-	 */
+	/** Client thread only. */
 	private Map<Integer, Integer> liveHeldQuantities()
 	{
 		Map<Integer, Integer> out = new HashMap<>();
@@ -280,10 +268,7 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 		return out;
 	}
 
-	/**
-	 * Adds the ammunition stored in a Dizana's quiver. The quiver keeps its ammo in varplayers
-	 * rather than an item container, so it is not covered by {@link #addContainer}.
-	 */
+	/** The quiver keeps its ammo in varplayers, not in an item container. */
 	private void addQuiver(Map<Integer, Integer> out)
 	{
 		int ammoId = client.getVarpValue(VarPlayerID.DIZANAS_QUIVER_TEMP_AMMO);
@@ -307,12 +292,10 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 			{
 				continue;
 			}
-			// Canonicalize so a noted (or placeholder) item counts as the real item it was bought as.
-			out.merge(itemManager.canonicalize(item.getId()), item.getQuantity(), Integer::sum);
+			int unnotedId = itemManager.canonicalize(item.getId());
+			out.merge(unnotedId, item.getQuantity(), Integer::sum);
 		}
 	}
-
-	// ---- PortfolioActions (invoked from the panel on the EDT) ----------------
 
 	@Override
 	public void addManual(String query, int quantity, long priceEach, long heldSinceEpochMs)
@@ -328,19 +311,23 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 			int itemId = resolveItemId(query);
 			if (itemId <= 0)
 			{
-				panel.setStatus("No item found for \"" + query + "\".", Color.RED);
+				panel.setStatus("No item found for \"" + query + "\".", config.lossColor());
 				return;
 			}
 
 			String name = itemManager.getItemComposition(itemId).getName();
-			// Adding an item you want tracked implicitly unblocks it.
-			configManager.setConfiguration(BankStonksConfig.GROUP, BankStonksConfig.KEY_BLOCK_LIST, BlockLists.remove(config.blockList(), name));
+			unblock(name);
 			manager.recordBuy(itemId, quantity, priceEach * quantity, heldSinceEpochMs);
 			manager.save();
 			panel.setStatus("Added " + quantity + " x " + name + ".", Color.LIGHT_GRAY);
 			panel.clearManualEntry();
 			refresh();
 		});
+	}
+
+	private void unblock(String itemName)
+	{
+		configManager.setConfiguration(BankStonksConfig.GROUP, BankStonksConfig.KEY_BLOCK_LIST, BlockLists.remove(config.blockList(), itemName));
 	}
 
 	@Override
@@ -405,7 +392,12 @@ public class BankStonksPlugin extends Plugin implements PortfolioActions
 		});
 	}
 
-	/** Resolves a user-typed name to an item id, preferring an exact (case-insensitive) match. */
+	@Override
+	public void setSortOrder(SortOrder order)
+	{
+		configManager.setConfiguration(BankStonksConfig.GROUP, BankStonksConfig.KEY_SORT_ORDER, order);
+	}
+
 	private int resolveItemId(String query)
 	{
 		List<ItemPrice> results = itemManager.search(query);

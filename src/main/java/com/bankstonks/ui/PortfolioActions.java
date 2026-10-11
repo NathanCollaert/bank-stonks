@@ -1,42 +1,32 @@
 package com.bankstonks.ui;
 
-/**
- * Callbacks the panel uses to ask the plugin to mutate portfolio state. The plugin performs
- * the work on the client thread and refreshes the panel afterwards.
- */
+import com.bankstonks.SortOrder;
+
+/** The plugin does the work on the client thread and refreshes the panel afterwards. */
 public interface PortfolioActions
 {
 	/**
-	 * Manually records a buy for the item best matching {@code query}.
+	 * Records a buy for the item whose name best matches {@code query}.
 	 *
-	 * @param query             item name to resolve (fuzzy)
-	 * @param quantity          quantity acquired
-	 * @param priceEach         price paid per item
-	 * @param heldSinceEpochMs  when it was bought (epoch millis), or 0 to use now
+	 * @param heldSinceEpochMs when it was bought, or 0 for now
 	 */
 	void addManual(String query, int quantity, long priceEach, long heldSinceEpochMs);
 
-	/**
-	 * Deletes an item's tracked data. It disappears from the list and reappears (fresh) only
-	 * if bought again. This is not the block list — it is a one-time removal.
-	 */
+	/** Deletes the item's whole history; it reappears, fresh, only if bought again. */
 	void untrackItem(int itemId);
 
-	/** Removes a single buy lot from an item's history (matched by quantity, spent and date). */
 	void untrackLot(int itemId, int quantity, long spent, long epochMs);
 
-	/**
-	 * Adds an item to the block list so it is never shown (it is still tracked in the
-	 * background). Reversible only by editing the block list in settings.
-	 */
+	/** Hides the item for good but keeps tracking it. Undone only by editing the block list in settings. */
 	void blockItem(String itemName);
 
-	/** Locks an item to its most recent buy: pinned in the list and valued at that buy. */
+	/** Locks the item to its most recent buy: it stays listed and is valued at that buy. */
 	void lockItem(int itemId);
 
-	/** Locks an item to a specific buy (matched by quantity, spent and date). */
 	void lockLot(int itemId, int quantity, long spent, long epochMs);
 
-	/** Removes an item's lock. */
 	void unlockItem(int itemId);
+
+	/** Changes the same setting as the config panel. */
+	void setSortOrder(SortOrder order);
 }

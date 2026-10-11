@@ -1,294 +1,155 @@
 package com.bankstonks.ui;
 
-import com.bankstonks.Format;
 import com.bankstonks.BankStonksConfig;
+import com.bankstonks.SortOrder;
 import com.bankstonks.model.Lot;
 import com.bankstonks.model.PortfolioRow;
-import java.awt.AlphaComposite;
-import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
-import java.awt.Cursor;
 import java.awt.Dimension;
-import java.awt.FlowLayout;
 import java.awt.Graphics2D;
-import java.awt.GridLayout;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
+import java.awt.KeyboardFocusManager;
+import java.awt.Rectangle;
 import java.awt.RenderingHints;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
-import java.awt.geom.Arc2D;
-import java.awt.geom.Ellipse2D;
-import java.awt.geom.RoundRectangle2D;
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
 import java.time.Instant;
-import java.time.LocalDate;
-import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeFormatterBuilder;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.ButtonGroup;
+import javax.swing.Icon;
+import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
-import javax.swing.ImageIcon;
+import javax.swing.JRadioButtonMenuItem;
+import javax.swing.JScrollPane;
 import javax.swing.JTextField;
+import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.border.EmptyBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
-import net.runelite.client.game.ItemManager;
-import net.runelite.client.ui.ColorScheme;
-import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
-import net.runelite.client.ui.components.IconTextField;
 import net.runelite.client.util.AsyncBufferedImage;
+import net.runelite.client.util.ImageUtil;
 
-/**
- * Sidebar panel: manual-add form, search filter, total P/L header, the held-item list and a
- * collapsible block list.
- */
 public class BankStonksPanel extends PluginPanel
 {
-	private final ItemManager itemManager;
+	private static final DateTimeFormatter LOT_DATE = DateTimeFormatter.ofPattern("d MMM yy", Locale.ENGLISH);
+	private static final String ADD_TOGGLE_TOOLTIP = "Add a purchase by hand";
+	private static final int EMPTY_STATE_ICON_SCALE = 2;
+
+	private final ItemImages itemImages;
 	private final BankStonksConfig config;
 	private final PortfolioActions actions;
 
-	private final JLabel totalLabel = new JLabel("0", SwingConstants.CENTER);
-
-	private final JTextField nameField = new JTextField();
-	private final JTextField qtyField = new JTextField();
-	private final JTextField priceField = new JTextField();
-	private final JTextField heldSinceField = new JTextField();
-	private final JLabel statusLabel = new JLabel(" ", SwingConstants.CENTER);
-
-	private final JButton addToggle = new JButton();
-	private final JPanel addBody = new JPanel();
-	private JPanel addFormPanel;
-	private boolean addExpanded = false;
-
-	private final IconTextField searchField = new IconTextField();
-
-	private final JPanel listPanel = new JPanel();
-	private final JLabel emptyLabel = new JLabel("<html><center>No tracked items yet.<br>Buy on the GE or add one above.</center></html>", SwingConstants.CENTER);
+	private final SummaryCard summary = new SummaryCard();
+	private final JTextField searchField = Widgets.textField("Search items", null, Theme.SURFACE);
+	private final JButton addToggle;
+	private final AddForm addForm;
+	private final Collapsible addPanel;
+	private final ListView listView = new ListView();
+	private final JScrollPane scrollPane;
 
 	private List<PortfolioRow> allRows = new ArrayList<>();
+	/**
+	 * Starts true: the plugin only updates on game ticks, and the login screen has none, so starting
+	 * false would claim nothing is tracked.
+	 */
+	private boolean loggedOut = true;
 
-	/** Item ids whose buy-history dropdown is expanded. */
 	private final Set<Integer> expandedItems = new HashSet<>();
 
-	private static final DateTimeFormatter LOT_DATE = DateTimeFormatter.ofPattern("d MMM yy", Locale.ENGLISH);
-
-	/** Accent colour marking a locked (pinned) item or buy. */
-	private static final Color LOCK_COLOR = new Color(230, 185, 60);
-
-	/** Small gold padlock shown next to a locked item's held line. */
-	private static final ImageIcon LOCK_ICON = buildLockIcon();
-
-	private static ImageIcon buildLockIcon()
+	public BankStonksPanel(ItemImages itemImages, BankStonksConfig config, PortfolioActions actions)
 	{
-		int w = 7;
-		int lock = 9;
-		// JLabel centres the icon on the font's line box, which sits below the small font's visible
-		// glyphs, so transparent space below the padlock lifts it up onto the text's centre.
-		int bottomPad = 4;
-		int h = lock + bottomPad;
-		BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
-		Graphics2D g = img.createGraphics();
-		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-		g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
-		g.setColor(LOCK_COLOR);
-		g.setStroke(new BasicStroke(1.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-		g.draw(new Arc2D.Double(1.6, 1.0, w - 3.2, 5.5, 0, 180, Arc2D.OPEN));
-		g.fill(new RoundRectangle2D.Double(0.5, 3.5, w - 1.0, lock - 3.5, 1.8, 1.8));
-		// Punch a keyhole so it reads as a lock.
-		g.setComposite(AlphaComposite.Clear);
-		g.fill(new Ellipse2D.Double(w / 2.0 - 0.8, 4.9, 1.6, 1.6));
-		g.setComposite(AlphaComposite.SrcOver);
-		g.dispose();
-		return new ImageIcon(img);
-	}
-
-	public BankStonksPanel(ItemManager itemManager, BankStonksConfig config, PortfolioActions actions)
-	{
-		this.itemManager = itemManager;
+		super(false);
+		this.itemImages = itemImages;
 		this.config = config;
 		this.actions = actions;
 
-		setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
-		setBackground(ColorScheme.DARK_GRAY_COLOR);
-		setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+		setLayout(new BorderLayout());
+		setBackground(Theme.CANVAS);
 
-		addStretched(buildHeader());
-		add(Box.createVerticalStrut(8));
-		addStretched(buildAddForm());
-		add(Box.createVerticalStrut(8));
-		addStretched(buildSearchField());
-		add(Box.createVerticalStrut(8));
+		addForm = new AddForm(actions::addManual, config::lossColor, this::toggleAddForm);
+		addPanel = new Collapsible(spacedFromToolbar(addForm), false, this::repaintAddToggle);
+		addToggle = Widgets.iconButton(Icons.plus(() -> 45 * addPanel.progress()), ADD_TOGGLE_TOOLTIP, this::toggleAddForm);
+		add(buildHeader(), BorderLayout.NORTH);
 
-		listPanel.setLayout(new BoxLayout(listPanel, BoxLayout.Y_AXIS));
-		listPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		listPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-		add(listPanel);
+		scrollPane = new JScrollPane(listView, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+		styleScrollPane(scrollPane);
+		add(scrollPane, BorderLayout.CENTER);
 
-		emptyLabel.setForeground(Color.GRAY);
-		emptyLabel.setFont(FontManager.getRunescapeSmallFont());
+		renderList();
 	}
 
-	// ---- construction helpers ------------------------------------------------
-
-	/** Adds a component to the vertical layout stretched to the full panel width. */
-	private void addStretched(JComponent c)
+	private static JPanel spacedFromToolbar(AddForm form)
 	{
-		c.setAlignmentX(Component.LEFT_ALIGNMENT);
-		c.setMaximumSize(new Dimension(Integer.MAX_VALUE, c.getPreferredSize().height));
-		add(c);
+		JPanel formWrap = new JPanel(new BorderLayout());
+		formWrap.setOpaque(false);
+		formWrap.setBorder(new EmptyBorder(Theme.GAP, 0, 0, 0));
+		formWrap.add(form, BorderLayout.CENTER);
+		return formWrap;
 	}
 
 	private JPanel buildHeader()
 	{
-		JPanel header = new JPanel(new BorderLayout());
-		header.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		header.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+		JButton[] sort = new JButton[1];
+		sort[0] = Widgets.iconButton(Icons.sort(), "Sort by", () -> showSortMenu(sort[0]));
 
-		JLabel title = new JLabel("Bank Stonks profit / loss", SwingConstants.CENTER);
-		title.setFont(FontManager.getRunescapeSmallFont());
-		title.setForeground(Color.LIGHT_GRAY);
-
-		totalLabel.setFont(FontManager.getRunescapeBoldFont());
-		totalLabel.setBorder(BorderFactory.createEmptyBorder(4, 0, 0, 0));
-
-		header.add(title, BorderLayout.NORTH);
-		header.add(totalLabel, BorderLayout.CENTER);
+		JPanel header = new JPanel();
+		header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
+		header.setBackground(Theme.CANVAS);
+		header.setBorder(new EmptyBorder(Theme.SIDE, Theme.SIDE, 0, Theme.SIDE));
+		stretch(header, summary);
+		header.add(Box.createVerticalStrut(Theme.GAP));
+		stretch(header, Widgets.hbox(Theme.SPACE_XS, buildSearchField(), sort[0], addToggle));
+		stretch(header, addPanel);
 		return header;
 	}
 
-	private JPanel buildAddForm()
+	private static void styleScrollPane(JScrollPane pane)
 	{
-		JPanel form = new JPanel();
-		form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
-		form.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		form.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-		addFormPanel = form;
-
-		addToggle.setFocusPainted(false);
-		addToggle.setHorizontalAlignment(SwingConstants.LEFT);
-		addToggle.setFont(FontManager.getRunescapeSmallFont());
-		addToggle.setForeground(Color.LIGHT_GRAY);
-		addToggle.setContentAreaFilled(false);
-		addToggle.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
-		addToggle.setText(addExpanded ? "[-] Add item manually" : "[+] Add item manually");
-		addToggle.addActionListener(e -> toggleAddForm());
-
-		styleField(nameField);
-		styleField(qtyField);
-		styleField(priceField);
-		styleField(heldSinceField);
-
-		nameField.setToolTipText("Item name");
-		JPanel nameLabeled = labeled("Item", nameField);
-
-		JPanel qtyPrice = new JPanel(new GridLayout(1, 2, 4, 0));
-		qtyPrice.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		qtyField.setToolTipText("Quantity");
-		priceField.setToolTipText("Price each (e.g. 1.5m, 250k, 1200)");
-		qtyPrice.add(labeled("Qty", qtyField));
-		qtyPrice.add(labeled("Price ea", priceField));
-
-		heldSinceField.setToolTipText("Optional. When you bought it, e.g. 2023-03-15, Jan 2024, or 2y / 6mo ago. Blank = now.");
-		JPanel heldSince = labeled("Held since (optional)", heldSinceField);
-
-		JButton addBtn = new JButton("Add");
-		addBtn.setFocusPainted(false);
-		addBtn.addActionListener(e -> onAdd());
-
-		statusLabel.setFont(FontManager.getRunescapeSmallFont());
-		statusLabel.setForeground(Color.GRAY);
-
-		addBody.setLayout(new BoxLayout(addBody, BoxLayout.Y_AXIS));
-		addBody.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		addBody.setVisible(addExpanded);
-
-		stretch(addToggle);
-		stretch(nameLabeled);
-		stretch(qtyPrice);
-		stretch(heldSince);
-		stretch(addBtn);
-		stretch(statusLabel);
-
-		addBody.add(Box.createVerticalStrut(6));
-		addBody.add(nameLabeled);
-		addBody.add(Box.createVerticalStrut(4));
-		addBody.add(qtyPrice);
-		addBody.add(Box.createVerticalStrut(4));
-		addBody.add(heldSince);
-		addBody.add(Box.createVerticalStrut(4));
-		addBody.add(addBtn);
-		addBody.add(statusLabel);
-		addBody.setAlignmentX(Component.LEFT_ALIGNMENT);
-		addBody.setMaximumSize(new Dimension(Integer.MAX_VALUE, addBody.getPreferredSize().height));
-
-		form.add(addToggle);
-		form.add(addBody);
-		return form;
+		pane.setBorder(new EmptyBorder(0, 0, 0, 0));
+		pane.setBackground(Theme.CANVAS);
+		pane.getViewport().setBackground(Theme.CANVAS);
+		pane.getVerticalScrollBar().setPreferredSize(new Dimension(Theme.SCROLLBAR_WIDTH, 0));
+		pane.getVerticalScrollBar().setUnitIncrement(16);
 	}
 
-	private void styleField(JTextField field)
-	{
-		field.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		field.setForeground(Color.WHITE);
-		field.setCaretColor(Color.WHITE);
-		field.setBorder(BorderFactory.createCompoundBorder(
-			BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR),
-			BorderFactory.createEmptyBorder(2, 4, 2, 4)));
-	}
-
-	private void toggleAddForm()
-	{
-		addExpanded = !addExpanded;
-		addBody.setVisible(addExpanded);
-		addToggle.setText(addExpanded ? "[-] Add item manually" : "[+] Add item manually");
-		addFormPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, addFormPanel.getPreferredSize().height));
-		revalidate();
-		repaint();
-	}
-
-	private static void stretch(JComponent c)
+	private static void stretch(JPanel parent, JComponent c)
 	{
 		c.setAlignmentX(Component.LEFT_ALIGNMENT);
-		c.setMaximumSize(new Dimension(Integer.MAX_VALUE, c.getPreferredSize().height));
+		if (!(c instanceof Collapsible))
+		{
+			c.setMaximumSize(new Dimension(Integer.MAX_VALUE, c.getPreferredSize().height));
+		}
+		parent.add(c);
 	}
 
-	private JPanel labeled(String text, Component field)
+	private JTextField buildSearchField()
 	{
-		JPanel p = new JPanel(new BorderLayout(0, 2));
-		p.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		JLabel l = new JLabel(text);
-		l.setFont(FontManager.getRunescapeSmallFont());
-		l.setForeground(Color.GRAY);
-		p.add(l, BorderLayout.NORTH);
-		p.add(field, BorderLayout.CENTER);
-		return p;
-	}
-
-	private IconTextField buildSearchField()
-	{
-		searchField.setIcon(IconTextField.Icon.SEARCH);
-		searchField.setPreferredSize(new Dimension(100, 30));
-		searchField.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		searchField.setHoverBackgroundColor(ColorScheme.DARK_GRAY_HOVER_COLOR);
+		// FlatLaf draws the leading icon against the border, outside the field's margin.
+		searchField.putClientProperty("JTextField.leadingIcon", Icons.padLeft(Icons.search(Theme.TEXT_FAINT), Theme.SPACE_XS));
+		searchField.putClientProperty("JTextField.showClearButton", true);
+		searchField.setMaximumSize(new Dimension(Integer.MAX_VALUE, Theme.CONTROL_SIZE));
 		searchField.getDocument().addDocumentListener(new DocumentListener()
 		{
 			@Override
@@ -309,77 +170,132 @@ public class BankStonksPanel extends PluginPanel
 				renderList();
 			}
 		});
-		searchField.addClearListener(this::renderList);
+		searchField.addKeyListener(new KeyAdapter()
+		{
+			@Override
+			public void keyPressed(KeyEvent e)
+			{
+				if (e.getKeyCode() == KeyEvent.VK_ESCAPE)
+				{
+					searchField.setText("");
+				}
+			}
+		});
 		return searchField;
 	}
 
-	// ---- actions -------------------------------------------------------------
-
-	private void onAdd()
+	private void showSortMenu(JButton anchor)
 	{
-		String name = nameField.getText().trim();
-		Integer qty = parseAmountInt(qtyField.getText());
-		Long price = parseAmount(priceField.getText());
-
-		if (name.isEmpty() || qty == null || qty <= 0 || price == null || price <= 0)
+		JPopupMenu menu = new JPopupMenu();
+		ButtonGroup group = new ButtonGroup();
+		for (SortOrder order : SortOrder.values())
 		{
-			setStatus("Enter an item, quantity and price.", config.lossColor());
-			return;
+			JRadioButtonMenuItem item = new JRadioButtonMenuItem(order.toString(), order == config.sortOrder());
+			item.addActionListener(e -> actions.setSortOrder(order));
+			group.add(item);
+			menu.add(item);
 		}
-
-		Long heldSince = parseHeldSince(heldSinceField.getText());
-		if (heldSince == null)
-		{
-			setStatus("Couldn't read 'held since'. Try 2023-03-15 or 2y.", config.lossColor());
-			return;
-		}
-
-		// Fields are cleared only on success, via clearManualEntry() from the plugin.
-		actions.addManual(name, qty, price, heldSince);
+		// Right-aligned to the button, so it opens over the sidebar rather than past its edge.
+		menu.show(anchor, anchor.getWidth() - menu.getPreferredSize().width, anchor.getHeight() + Theme.SPACE_XS);
 	}
 
-	/** Shows a transient status message under the add form. Thread-safe. */
+	private void toggleAddForm()
+	{
+		setAddFormOpen(!addPanel.isExpanded(), true);
+	}
+
+	void setAddFormOpen(boolean open, boolean animate)
+	{
+		addPanel.setExpanded(open, animate);
+		addToggle.setSelected(open);
+		addToggle.setToolTipText(open ? "Close" : ADD_TOGGLE_TOOLTIP);
+		if (open)
+		{
+			addForm.focusName();
+		}
+		else
+		{
+			releaseFocusFromHiddenAddForm();
+		}
+	}
+
+	private void releaseFocusFromHiddenAddForm()
+	{
+		KeyboardFocusManager focus = KeyboardFocusManager.getCurrentKeyboardFocusManager();
+		Component owner = focus.getFocusOwner();
+		if (owner != null && SwingUtilities.isDescendingFrom(owner, addForm))
+		{
+			focus.clearFocusOwner();
+		}
+	}
+
+	private void repaintAddToggle()
+	{
+		addToggle.repaint();
+	}
+
+	/** The answer to a manual add. Thread-safe. */
 	public void setStatus(String message, Color color)
 	{
-		SwingUtilities.invokeLater(() ->
-		{
-			statusLabel.setText(message == null || message.isEmpty() ? " " : message);
-			statusLabel.setForeground(color);
-		});
+		SwingUtilities.invokeLater(() -> addForm.showStatus(message, color));
 	}
 
-	/** Clears the manual-add fields. Called only after a successful add. Thread-safe. */
+	/** Call only after a successful add. Thread-safe. */
 	public void clearManualEntry()
 	{
-		SwingUtilities.invokeLater(() ->
-		{
-			nameField.setText("");
-			qtyField.setText("");
-			priceField.setText("");
-			heldSinceField.setText("");
-		});
+		SwingUtilities.invokeLater(addForm::clear);
 	}
 
-	// ---- rendering -----------------------------------------------------------
-
-	/** Rebuilds the panel from the given rows. Thread-safe. */
+	/** Thread-safe. */
 	public void update(List<PortfolioRow> rows, long total)
 	{
 		SwingUtilities.invokeLater(() ->
 		{
+			loggedOut = false;
 			allRows = rows;
+			summary.set(rows, total, colorFor(total), config.showPercent());
+			renderList();
+		});
+	}
 
-			totalLabel.setText(Format.gp(total));
-			totalLabel.setForeground(colorFor(total));
-
+	/** Thread-safe. */
+	public void showLoggedOut()
+	{
+		SwingUtilities.invokeLater(() ->
+		{
+			loggedOut = true;
+			allRows = new ArrayList<>();
+			summary.set(allRows, 0, colorFor(0), config.showPercent());
 			renderList();
 		});
 	}
 
 	private void renderList()
 	{
-		listPanel.removeAll();
+		listView.removeAll();
+		List<PortfolioRow> visible = rowsMatchingSearch();
+		if (loggedOut)
+		{
+			listView.add(emptyState("Log in to see your stonks", "Your tracked buys load once<br>you're logged in.", false), BorderLayout.CENTER);
+		}
+		else if (allRows.isEmpty())
+		{
+			listView.add(emptyState("Nothing tracked yet", "Buy something on the Grand Exchange<br>and its profit shows up here.", true), BorderLayout.CENTER);
+		}
+		else if (visible.isEmpty())
+		{
+			listView.add(noMatchLabel(), BorderLayout.NORTH);
+		}
+		else
+		{
+			listView.add(itemsCard(visible), BorderLayout.NORTH);
+		}
+		listView.revalidate();
+		listView.repaint();
+	}
 
+	private List<PortfolioRow> rowsMatchingSearch()
+	{
 		String filter = searchField.getText() == null ? "" : searchField.getText().trim().toLowerCase(Locale.ROOT);
 		List<PortfolioRow> visible = new ArrayList<>();
 		for (PortfolioRow row : allRows)
@@ -389,246 +305,225 @@ public class BankStonksPanel extends PluginPanel
 				visible.add(row);
 			}
 		}
+		return visible;
+	}
 
-		if (allRows.isEmpty())
+	private JLabel noMatchLabel()
+	{
+		JLabel none = new JLabel("No items match \"" + searchField.getText().trim() + "\"", SwingConstants.CENTER);
+		none.setFont(Theme.small());
+		none.setForeground(Theme.TEXT_FAINT);
+		none.setBorder(new EmptyBorder(Theme.SPACE_L, 0, 0, 0));
+		return none;
+	}
+
+	private Widgets.Card itemsCard(List<PortfolioRow> visible)
+	{
+		Widgets.Card group = new Widgets.Card(null);
+		group.setLayout(new BoxLayout(group, BoxLayout.Y_AXIS));
+		for (int i = 0; i < visible.size(); i++)
 		{
-			listPanel.add(emptyLabel);
+			boolean dividerAbove = i > 0;
+			group.add(buildBlock(visible.get(i), dividerAbove));
 		}
-		else if (visible.isEmpty())
+		return group;
+	}
+
+	private JComponent buildBlock(PortfolioRow row, boolean dividerAbove)
+	{
+		ItemRow itemRow = buildItemRow(row, dividerAbove);
+		if (!itemRow.isCollapsible())
 		{
-			JLabel none = new JLabel("No matches.", SwingConstants.CENTER);
-			none.setForeground(Color.GRAY);
-			none.setFont(FontManager.getRunescapeSmallFont());
-			listPanel.add(none);
+			return itemRow;
+		}
+
+		Collapsible history = new Collapsible(buildLotList(row), expandedItems.contains(row.getItemId()), itemRow::repaint);
+		history.setAlignmentX(Component.LEFT_ALIGNMENT);
+		itemRow.setExpandProgress(history::progress);
+		itemRow.setOnToggle(() -> toggleHistory(row, history));
+
+		JPanel block = new JPanel();
+		block.setOpaque(false);
+		block.setLayout(new BoxLayout(block, BoxLayout.Y_AXIS));
+		block.setAlignmentX(Component.LEFT_ALIGNMENT);
+		block.add(itemRow);
+		block.add(history);
+		return block;
+	}
+
+	private ItemRow buildItemRow(PortfolioRow row, boolean dividerAbove)
+	{
+		AsyncBufferedImage image = itemImages.get(row.getItemId(), row.getQuantity(), row.getQuantity() > 1);
+		ItemRow itemRow = new ItemRow(row, image, colorFor(row.getProfitTotal()), config.showPercent(), dividerAbove);
+		image.onLoaded(() -> SwingUtilities.invokeLater(itemRow::repaint));
+		itemRow.setMenu(() -> itemMenu(row));
+		itemRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+		return itemRow;
+	}
+
+	private JPanel buildLotList(PortfolioRow row)
+	{
+		JPanel lots = new JPanel();
+		lots.setLayout(new BoxLayout(lots, BoxLayout.Y_AXIS));
+		lots.setBackground(Theme.INSET_SURFACE);
+		lots.setBorder(new EmptyBorder(Theme.SPACE_XS, 0, Theme.SPACE_XS, 0));
+		for (Lot lot : row.getLots())
+		{
+			LotRow lotRow = new LotRow(lot, formatDate(lot.getEpochMs()), () -> lotMenu(row.getItemId(), lot));
+			lotRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+			lots.add(lotRow);
+		}
+		return lots;
+	}
+
+	private void toggleHistory(PortfolioRow row, Collapsible history)
+	{
+		boolean open = !history.isExpanded();
+		if (open)
+		{
+			expandedItems.add(row.getItemId());
 		}
 		else
 		{
-			for (PortfolioRow row : visible)
-			{
-				listPanel.add(buildRow(row));
-				listPanel.add(Box.createVerticalStrut(4));
-			}
+			expandedItems.remove(row.getItemId());
 		}
-
-		listPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, listPanel.getPreferredSize().height));
-		listPanel.revalidate();
-		listPanel.repaint();
+		history.setExpanded(open, true);
 	}
 
-	private JPanel buildRow(PortfolioRow row)
+	private JPopupMenu itemMenu(PortfolioRow row)
 	{
-		boolean collapsible = row.getLots() != null && row.getLots().size() > 1;
-		boolean expanded = collapsible && expandedItems.contains(row.getItemId());
-
-		JPanel container = new JPanel();
-		container.setLayout(new BoxLayout(container, BoxLayout.Y_AXIS));
-		container.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		container.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-		JPanel main = new JPanel(new BorderLayout(6, 0));
-		main.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		main.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 4));
-
-		JLabel icon = new JLabel();
-		icon.setPreferredSize(new Dimension(32, 32));
-		AsyncBufferedImage image = itemManager.getImage(row.getItemId(), row.getQuantity(), row.getQuantity() > 1);
-		image.addTo(icon);
-		main.add(icon, BorderLayout.WEST);
-
-		String age = Format.age(row.getFirstBoughtEpochMs());
-		String heldText = age.isEmpty() ? "" : "held " + age;
-		JPanel middle = new JPanel(new GridLayout(heldText.isEmpty() ? 2 : 3, 1));
-		middle.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		JLabel name = new JLabel(row.getName());
-		name.setFont(FontManager.getRunescapeSmallFont());
-		name.setForeground(Color.WHITE);
+		JPopupMenu menu = new JPopupMenu();
 		if (row.isLocked())
 		{
-			// A small gold padlock in front of the name marks the item as locked.
-			name.setIcon(LOCK_ICON);
-			name.setIconTextGap(4);
-			name.setVerticalAlignment(SwingConstants.CENTER);
-			name.setVerticalTextPosition(SwingConstants.CENTER);
-			name.setToolTipText("Locked to this buy");
-		}
-		JLabel detail = new JLabel(row.getQuantity() + " @ " + Format.plain(row.getAverageBuyPrice()));
-		detail.setFont(FontManager.getRunescapeSmallFont());
-		detail.setForeground(Color.GRAY);
-		detail.setToolTipText(Format.exact(row.getAverageBuyPrice()) + " gp each");
-		// Wrap so the price tooltip only covers the text, not the whole row width.
-		JPanel detailWrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-		detailWrap.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		detailWrap.add(detail);
-		middle.add(name);
-		middle.add(detailWrap);
-		if (!heldText.isEmpty())
-		{
-			JLabel held = new JLabel(heldText);
-			held.setFont(FontManager.getRunescapeSmallFont());
-			held.setForeground(Color.GRAY.darker());
-			middle.add(held);
-		}
-		main.add(middle, BorderLayout.CENTER);
-
-		JPanel plInfo = new JPanel(new GridLayout(config.showPercent() ? 2 : 1, 1));
-		plInfo.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		String currentTip = Format.exact(row.getCurrentPrice()) + " gp each";
-		JLabel pl = new JLabel(Format.gp(row.getProfitTotal()), SwingConstants.RIGHT);
-		pl.setFont(FontManager.getRunescapeSmallFont());
-		pl.setForeground(colorFor(row.getProfitTotal()));
-		pl.setToolTipText(currentTip);
-		plInfo.add(pl);
-		if (config.showPercent())
-		{
-			JLabel pct = new JLabel(String.format("%+.1f%%", row.profitPercent()), SwingConstants.RIGHT);
-			pct.setFont(FontManager.getRunescapeSmallFont());
-			pct.setForeground(colorFor(row.getProfitTotal()));
-			pct.setToolTipText(currentTip);
-			plInfo.add(pct);
-		}
-		main.add(plInfo, BorderLayout.EAST);
-
-		// Right-click the item to untrack (delete all its history; reappears if rebought) or
-		// block (never show; still tracked in the background).
-		JPopupMenu popup = new JPopupMenu();
-		if (row.isLocked())
-		{
-			JMenuItem unlock = new JMenuItem("Unlock " + row.getName());
-			unlock.setToolTipText("Stop pinning this item to a single buy");
-			unlock.addActionListener(e -> actions.unlockItem(row.getItemId()));
-			popup.add(unlock);
+			menu.add(menuItem("Unlock", Icons.unlock(), "Stop pinning this item to a single buy",
+				() -> actions.unlockItem(row.getItemId())));
 		}
 		else
 		{
-			JMenuItem lock = new JMenuItem("Lock " + row.getName());
-			lock.setToolTipText("Pin this item to its most recent buy; stays shown even when you hold none");
-			lock.addActionListener(e -> actions.lockItem(row.getItemId()));
-			popup.add(lock);
+			menu.add(menuItem("Lock to latest buy", Icons.lock(), "Pin this item to its most recent buy; stays shown even when you hold none",
+				() -> actions.lockItem(row.getItemId())));
 		}
-		JMenuItem untrack = new JMenuItem("Untrack " + row.getName());
-		untrack.setToolTipText("Remove all history for this item; reappears if bought again");
-		untrack.addActionListener(e -> actions.untrackItem(row.getItemId()));
-		JMenuItem block = new JMenuItem("Block " + row.getName());
-		block.setToolTipText("Never show; still tracked in the background. Undo in settings.");
-		block.addActionListener(e -> actions.blockItem(row.getName()));
-		popup.add(untrack);
-		popup.add(block);
-		main.setComponentPopupMenu(popup);
-		inheritPopup(main);
-
-		// The whole row is clickable when there is buy history to expand: hover highlights it and
-		// a left click toggles the history dropdown.
-		if (collapsible)
-		{
-			main.setToolTipText(row.getLots().size() + " buys, click to " + (expanded ? "hide" : "show") + " history");
-			MouseAdapter rowMouse = new MouseAdapter()
-			{
-				@Override
-				public void mouseEntered(MouseEvent e)
-				{
-					setRowBackground(main, ColorScheme.DARKER_GRAY_HOVER_COLOR);
-				}
-
-				@Override
-				public void mouseExited(MouseEvent e)
-				{
-					if (main.getMousePosition() == null)
-					{
-						setRowBackground(main, ColorScheme.DARKER_GRAY_COLOR);
-					}
-				}
-
-				@Override
-				public void mousePressed(MouseEvent e)
-				{
-					if (SwingUtilities.isLeftMouseButton(e))
-					{
-						toggleExpanded(row.getItemId());
-					}
-				}
-			};
-			addMouseListenerDeep(main, rowMouse, Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		}
-
-		stretch(main);
-		container.add(main);
-
-		if (expanded)
-		{
-			for (Lot lot : row.getLots())
-			{
-				container.add(buildLotRow(row.getItemId(), lot));
-			}
-		}
-
-		container.setMaximumSize(new Dimension(Integer.MAX_VALUE, container.getPreferredSize().height));
-		return container;
+		menu.addSeparator();
+		menu.add(menuItem("Untrack", Icons.trash(), "Remove all history for this item; reappears if bought again",
+			() -> untrack(row)));
+		menu.add(menuItem("Block", Icons.block(), "Never show; still tracked in the background. Undo in settings.",
+			() -> actions.blockItem(row.getName())));
+		return menu;
 	}
 
-	/** A single buy in the expanded history: quantity, unit price and date, right-click to lock/remove. */
-	private JPanel buildLotRow(int itemId, Lot lot)
+	/** A locked item was pinned on purpose, so untracking one asks first. */
+	private void untrack(PortfolioRow row)
 	{
-		JPanel row = new JPanel(new BorderLayout(6, 0));
-		row.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		// A left accent marks it as a nested history entry; the inset lines it up under the name.
-		row.setBorder(BorderFactory.createCompoundBorder(
-			BorderFactory.createMatteBorder(0, 3, 0, 0, ColorScheme.MEDIUM_GRAY_COLOR),
-			BorderFactory.createEmptyBorder(6, 23, 6, 6)));
-
-		JLabel info = new JLabel(lot.getQuantity() + " @ " + Format.plain(lot.unitPrice()));
-		info.setFont(FontManager.getRunescapeSmallFont());
-		info.setForeground(Color.LIGHT_GRAY);
-		info.setToolTipText(Format.exact(lot.unitPrice()) + " gp each");
-		row.add(info, BorderLayout.WEST);
-
-		JLabel date = new JLabel(formatDate(lot.getEpochMs()), SwingConstants.RIGHT);
-		date.setFont(FontManager.getRunescapeSmallFont());
-		date.setForeground(Color.GRAY);
-		row.add(date, BorderLayout.EAST);
-
-		// Locking a specific buy pins the item to it; the item then collapses to that single buy.
-		JPopupMenu popup = new JPopupMenu();
-		JMenuItem lock = new JMenuItem("Lock this buy");
-		lock.addActionListener(e -> actions.lockLot(itemId, lot.getQuantity(), lot.getSpent(), lot.getEpochMs()));
-		popup.add(lock);
-		JMenuItem untrack = new JMenuItem("Remove this buy");
-		untrack.addActionListener(e -> actions.untrackLot(itemId, lot.getQuantity(), lot.getSpent(), lot.getEpochMs()));
-		popup.add(untrack);
-		row.setComponentPopupMenu(popup);
-		inheritPopup(row);
-
-		// Hover highlight signals the row is interactive (right-click to remove).
-		MouseAdapter hover = new MouseAdapter()
+		if (row.isLocked() && !confirmUntrackLocked(row))
 		{
-			@Override
-			public void mouseEntered(MouseEvent e)
-			{
-				setRowBackground(row, ColorScheme.DARK_GRAY_HOVER_COLOR);
-			}
-
-			@Override
-			public void mouseExited(MouseEvent e)
-			{
-				if (row.getMousePosition() == null)
-				{
-					setRowBackground(row, ColorScheme.DARK_GRAY_COLOR);
-				}
-			}
-		};
-		addMouseListenerDeep(row, hover, null);
-
-		row.setAlignmentX(Component.LEFT_ALIGNMENT);
-		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
-		return row;
+			return;
+		}
+		actions.untrackItem(row.getItemId());
 	}
 
-	private void toggleExpanded(int itemId)
+	private boolean confirmUntrackLocked(PortfolioRow row)
 	{
-		if (!expandedItems.remove(itemId))
+		String[] options = {"Untrack", "Cancel"};
+		int choice = JOptionPane.showOptionDialog(SwingUtilities.getWindowAncestor(this),
+			"<html>" + escapeHtml(row.getName()) + " is locked to a buy.<br>"
+				+ "Untracking deletes its whole buy history, including the locked buy.<br>"
+				+ "This can't be undone.</html>",
+			"Untrack locked item?", JOptionPane.DEFAULT_OPTION, JOptionPane.WARNING_MESSAGE, null, options, options[1]);
+		return choice == 0;
+	}
+
+	private static String escapeHtml(String text)
+	{
+		return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+	}
+
+	private JPopupMenu lotMenu(int itemId, Lot lot)
+	{
+		JPopupMenu menu = new JPopupMenu();
+		menu.add(menuItem("Lock this buy", Icons.lock(), "Pin the item to this buy",
+			() -> actions.lockLot(itemId, lot.getQuantity(), lot.getSpent(), lot.getEpochMs())));
+		menu.add(menuItem("Remove this buy", Icons.trash(), "Delete this buy from the history",
+			() -> actions.untrackLot(itemId, lot.getQuantity(), lot.getSpent(), lot.getEpochMs())));
+		return menu;
+	}
+
+	private static JMenuItem menuItem(String text, Icon icon, String tooltip, Runnable action)
+	{
+		JMenuItem item = new JMenuItem(text, icon);
+		item.setToolTipText(tooltip);
+		item.addActionListener(e -> action.run());
+		return item;
+	}
+
+	private JComponent emptyState(String title, String body, boolean withAddButton)
+	{
+		JPanel column = new JPanel();
+		column.setOpaque(false);
+		column.setLayout(new BoxLayout(column, BoxLayout.Y_AXIS));
+
+		JLabel icon = new JLabel(new ImageIcon(emptyStateIcon()));
+		JLabel titleLabel = new JLabel(title, SwingConstants.CENTER);
+		titleLabel.setFont(Theme.body());
+		titleLabel.setForeground(Theme.TEXT);
+		JLabel bodyLabel = new JLabel("<html><center>" + body + "</center></html>", SwingConstants.CENTER);
+		bodyLabel.setFont(Theme.small());
+		bodyLabel.setForeground(Theme.TEXT_MUTED);
+
+		for (JComponent c : new JComponent[]{icon, titleLabel, bodyLabel})
 		{
-			expandedItems.add(itemId);
+			c.setAlignmentX(Component.CENTER_ALIGNMENT);
 		}
-		renderList();
+		column.add(icon);
+		column.add(Box.createVerticalStrut(Theme.SPACE_S));
+		column.add(titleLabel);
+		column.add(Box.createVerticalStrut(Theme.SPACE_XS));
+		column.add(bodyLabel);
+		if (withAddButton)
+		{
+			JButton add = Widgets.primaryButton("Add a purchase", () ->
+			{
+				if (!addPanel.isExpanded())
+				{
+					toggleAddForm();
+				}
+			});
+			Widgets.fixSize(add, add.getPreferredSize());
+			add.setAlignmentX(Component.CENTER_ALIGNMENT);
+			column.add(Box.createVerticalStrut(Theme.SPACE_L));
+			column.add(add);
+		}
+		return centredNearTop(column);
+	}
+
+	/** Near the top rather than mid-height: on a tall client the middle is far from the header. */
+	private static JPanel centredNearTop(JComponent content)
+	{
+		JPanel holder = new JPanel(new GridBagLayout());
+		holder.setOpaque(false);
+		GridBagConstraints at = new GridBagConstraints();
+		at.anchor = GridBagConstraints.NORTH;
+		at.weightx = 1;
+		at.weighty = 1;
+		at.insets = new Insets(2 * Theme.SPACE_XL, 0, 0, 0);
+		holder.add(content, at);
+		return holder;
+	}
+
+	private static BufferedImage emptyStateIcon;
+
+	private static BufferedImage emptyStateIcon()
+	{
+		if (emptyStateIcon == null)
+		{
+			BufferedImage src = ImageUtil.loadImageResource(BankStonksPanel.class, "/nav_button.png");
+			BufferedImage big = new BufferedImage(src.getWidth() * EMPTY_STATE_ICON_SCALE, src.getHeight() * EMPTY_STATE_ICON_SCALE, BufferedImage.TYPE_INT_ARGB);
+			Graphics2D g = big.createGraphics();
+			g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+			g.drawImage(src, 0, 0, big.getWidth(), big.getHeight(), null);
+			g.dispose();
+			emptyStateIcon = big;
+		}
+		return emptyStateIcon;
 	}
 
 	static String formatDate(long epochMs)
@@ -638,55 +533,6 @@ public class BankStonksPanel extends PluginPanel
 			return "";
 		}
 		return Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()).toLocalDate().format(LOT_DATE);
-	}
-
-	/** Recolors a row: sets the panel's background and that of any nested panels (labels are transparent). */
-	private static void setRowBackground(java.awt.Container row, Color color)
-	{
-		row.setBackground(color);
-		for (java.awt.Component child : row.getComponents())
-		{
-			if (child instanceof JPanel)
-			{
-				setRowBackground((java.awt.Container) child, color);
-			}
-		}
-	}
-
-	/**
-	 * Attaches a mouse listener to a row and every descendant so hover/click work anywhere on it,
-	 * and optionally applies a cursor to the whole row.
-	 */
-	private static void addMouseListenerDeep(java.awt.Component c, MouseAdapter adapter, Cursor cursor)
-	{
-		c.addMouseListener(adapter);
-		if (cursor != null)
-		{
-			c.setCursor(cursor);
-		}
-		if (c instanceof java.awt.Container)
-		{
-			for (java.awt.Component child : ((java.awt.Container) c).getComponents())
-			{
-				addMouseListenerDeep(child, adapter, cursor);
-			}
-		}
-	}
-
-	/** Lets a row's child components trigger the row's right-click menu too. */
-	private static void inheritPopup(java.awt.Container container)
-	{
-		for (java.awt.Component child : container.getComponents())
-		{
-			if (child instanceof JComponent)
-			{
-				((JComponent) child).setInheritsPopupMenu(true);
-			}
-			if (child instanceof java.awt.Container)
-			{
-				inheritPopup((java.awt.Container) child);
-			}
-		}
 	}
 
 	private Color colorFor(long value)
@@ -699,180 +545,60 @@ public class BankStonksPanel extends PluginPanel
 		{
 			return config.lossColor();
 		}
-		return Color.LIGHT_GRAY;
+		return Theme.TEXT_MUTED;
 	}
-
-	/** Parses "1.5m", "250k", "1,200", "999" into a long. Returns null if unparseable. */
-	static Long parseAmount(String raw)
-	{
-		if (raw == null)
-		{
-			return null;
-		}
-		String s = raw.trim().toLowerCase(Locale.ROOT).replace(",", "").replace(" ", "");
-		if (s.isEmpty())
-		{
-			return null;
-		}
-		double mult = 1;
-		char last = s.charAt(s.length() - 1);
-		if (last == 'k')
-		{
-			mult = 1_000;
-			s = s.substring(0, s.length() - 1);
-		}
-		else if (last == 'm')
-		{
-			mult = 1_000_000;
-			s = s.substring(0, s.length() - 1);
-		}
-		else if (last == 'b')
-		{
-			mult = 1_000_000_000;
-			s = s.substring(0, s.length() - 1);
-		}
-		try
-		{
-			return (long) (Double.parseDouble(s) * mult);
-		}
-		catch (NumberFormatException e)
-		{
-			return null;
-		}
-	}
-
-	static Integer parseAmountInt(String raw)
-	{
-		Long v = parseAmount(raw);
-		if (v == null || v > Integer.MAX_VALUE)
-		{
-			return null;
-		}
-		return v.intValue();
-	}
-
-	private static final Pattern REL_TOKEN =
-		Pattern.compile("(\\d+)\\s*(years?|yrs?|y|months?|mons?|mo|weeks?|wks?|w|days?|d)");
-
-	private static final String[] DATE_FORMATS =
-		{"yyyy-MM-dd", "yyyy/MM/dd", "d-M-yyyy", "d/M/yyyy", "d MMM yyyy", "d MMMM yyyy"};
-
-	private static final String[] YEAR_MONTH_FORMATS =
-		{"yyyy-MM", "MMM yyyy", "MMMM yyyy", "MMM-yyyy"};
 
 	/**
-	 * Parses the optional "held since" input into an epoch-millis timestamp.
-	 *
-	 * <ul>
-	 *   <li>blank → 0 (meaning "use now")</li>
-	 *   <li>relative age: "2y", "6mo", "2y 3mo", "30d ago"</li>
-	 *   <li>absolute date: "2023-03-15", "Jan 2024", "2022"</li>
-	 * </ul>
-	 *
-	 * @return epoch millis, 0 for blank, or {@code null} if the value can't be understood.
+	 * Tracks the viewport's width, so rows ellipsize instead of widening the panel, and fills its
+	 * height when short, so the empty state centres.
 	 */
-	static Long parseHeldSince(String raw)
+	private final class ListView extends JPanel implements Scrollable
 	{
-		if (raw == null)
+		ListView()
 		{
-			return 0L;
+			super(new BorderLayout());
+			setBackground(Theme.CANVAS);
 		}
-		String s = raw.trim().toLowerCase(Locale.ROOT);
-		if (s.isEmpty())
-		{
-			return 0L;
-		}
-		Long relative = parseRelativeAge(s);
-		if (relative != null)
-		{
-			return relative;
-		}
-		return parseAbsoluteDate(s);
-	}
 
-	private static Long parseRelativeAge(String s)
-	{
-		String cleaned = s.replace("ago", "").replace(",", " ").trim();
-		if (cleaned.isEmpty())
+		/**
+		 * A showing scrollbar takes the right-hand margin, so the list's edge stays in line with the
+		 * header's.
+		 */
+		@Override
+		public Insets getInsets()
 		{
-			return null;
+			boolean scrollbarShowing = scrollPane != null && scrollPane.getVerticalScrollBar().isVisible();
+			return new Insets(Theme.GAP, Theme.SIDE, Theme.SIDE, scrollbarShowing ? Theme.SIDE - Theme.SCROLLBAR_WIDTH : Theme.SIDE);
 		}
-		Matcher m = REL_TOKEN.matcher(cleaned);
-		long totalDays = 0;
-		int idx = 0;
-		boolean any = false;
-		while (m.find())
-		{
-			if (!cleaned.substring(idx, m.start()).trim().isEmpty())
-			{
-				return null;
-			}
-			totalDays += Long.parseLong(m.group(1)) * unitDays(m.group(2));
-			idx = m.end();
-			any = true;
-		}
-		if (!any || !cleaned.substring(idx).trim().isEmpty())
-		{
-			return null;
-		}
-		return System.currentTimeMillis() - totalDays * 86_400_000L;
-	}
 
-	private static long unitDays(String unit)
-	{
-		if (unit.startsWith("y"))
+		@Override
+		public Dimension getPreferredScrollableViewportSize()
 		{
-			return 365;
+			return getPreferredSize();
 		}
-		if (unit.startsWith("mo"))
-		{
-			return 30;
-		}
-		if (unit.startsWith("w"))
-		{
-			return 7;
-		}
-		return 1;
-	}
 
-	private static Long parseAbsoluteDate(String s)
-	{
-		for (String fmt : DATE_FORMATS)
+		@Override
+		public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction)
 		{
-			try
-			{
-				return toEpochMs(LocalDate.parse(s, caseInsensitive(fmt)));
-			}
-			catch (Exception ignored)
-			{
-				// try next format
-			}
+			return ItemRow.HEIGHT / 2;
 		}
-		for (String fmt : YEAR_MONTH_FORMATS)
-		{
-			try
-			{
-				return toEpochMs(YearMonth.parse(s, caseInsensitive(fmt)).atDay(1));
-			}
-			catch (Exception ignored)
-			{
-				// try next format
-			}
-		}
-		if (s.matches("\\d{4}"))
-		{
-			return toEpochMs(LocalDate.of(Integer.parseInt(s), 1, 1));
-		}
-		return null;
-	}
 
-	private static DateTimeFormatter caseInsensitive(String pattern)
-	{
-		return new DateTimeFormatterBuilder().parseCaseInsensitive().appendPattern(pattern).toFormatter(Locale.ENGLISH);
-	}
+		@Override
+		public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction)
+		{
+			return Math.max(ItemRow.HEIGHT, visibleRect.height - ItemRow.HEIGHT);
+		}
 
-	private static long toEpochMs(LocalDate date)
-	{
-		return date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
+		@Override
+		public boolean getScrollableTracksViewportWidth()
+		{
+			return true;
+		}
+
+		@Override
+		public boolean getScrollableTracksViewportHeight()
+		{
+			return getParent() != null && getParent().getHeight() > getPreferredSize().height;
+		}
 	}
 }
