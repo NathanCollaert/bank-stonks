@@ -12,7 +12,6 @@ import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
-import java.awt.KeyboardFocusManager;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.event.KeyAdapter;
@@ -221,11 +220,9 @@ public class BankStonksPanel extends PluginPanel
 
 	private void releaseFocusFromHiddenAddForm()
 	{
-		KeyboardFocusManager focus = KeyboardFocusManager.getCurrentKeyboardFocusManager();
-		Component owner = focus.getFocusOwner();
-		if (owner != null && SwingUtilities.isDescendingFrom(owner, addForm))
+		if (addForm.hasFocusedField())
 		{
-			focus.clearFocusOwner();
+			addToggle.requestFocusInWindow();
 		}
 	}
 

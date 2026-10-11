@@ -145,6 +145,18 @@ final class AddForm extends Widgets.Card
 		nameField.requestFocusInWindow();
 	}
 
+	boolean hasFocusedField()
+	{
+		for (JTextField f : allFields())
+		{
+			if (f.isFocusOwner())
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	/** Leaves "held since" to {@link #onAdd}: a half-typed date is never valid. */
 	private void validateLive()
 	{
