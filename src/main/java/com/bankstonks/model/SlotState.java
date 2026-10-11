@@ -5,11 +5,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * The last-seen state of a single Grand Exchange slot, persisted per account.
- *
- * <p>Kept so that we can compute the delta between successive {@code GrandExchangeOfferChanged}
- * events (a single buy fills in increments) and, crucially, so we do not double-count offers
- * that the client re-broadcasts on login.</p>
+ * Persisted so that the offers the client re-sends on login diff to nothing instead of being
+ * counted again.
  */
 @Data
 @NoArgsConstructor
@@ -20,6 +17,6 @@ public class SlotState
 	private int quantitySold;
 	private long spent;
 
-	/** The lot id this offer accumulates into, so its partial fills group into one lot. */
+	/** The {@code offerId} of the {@link Lot} this offer's fills accumulate into. */
 	private long lotId;
 }

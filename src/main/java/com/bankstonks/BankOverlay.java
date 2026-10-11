@@ -15,10 +15,6 @@ import net.runelite.client.ui.overlay.tooltip.Tooltip;
 import net.runelite.client.ui.overlay.tooltip.TooltipManager;
 import net.runelite.client.util.ColorUtil;
 
-/**
- * Shows a tooltip when hovering a tracked item in the bank: how many are in your portfolio,
- * the average price you bought them for, and the current profit/loss on that amount.
- */
 @Singleton
 public class BankOverlay extends WidgetItemOverlay
 {
@@ -48,8 +44,6 @@ public class BankOverlay extends WidgetItemOverlay
 			return;
 		}
 
-		// Resolve to the tracked (bought) item, matching charged/banked items back to the
-		// uncharged item they were bought as.
 		int boughtId = manager.boughtIdForBankItem(itemId);
 		if (boughtId < 0)
 		{

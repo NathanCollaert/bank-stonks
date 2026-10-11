@@ -1,8 +1,5 @@
 package com.bankstonks;
 
-/**
- * How the sidebar list is ordered.
- */
 public enum SortOrder
 {
 	BIGGEST_MOVERS("Biggest movers"),

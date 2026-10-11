@@ -4,13 +4,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Grand Exchange armour/item "sets" and the component pieces they unpack into. A set is bought as
- * one tradeable item at one price (the cost basis), then usually unpacked into its pieces. This
- * table lets Bank Stonks recognise those held pieces as still being the set, so the purchase keeps
- * showing and is valued at the set's live GE price.
- *
- * <p>Covers every item set listed on the OSRS Wiki's Item set page (set id and component ids taken
- * from each set's wiki page). RuneLite has no data for this, so it is generated/maintained here.</p>
+ * Sets are usually unpacked after buying, so their pieces must still count as the set. RuneLite has
+ * no set data; this table follows the OSRS Wiki's "Item set" page.
  */
 final class ItemSets
 {
@@ -18,7 +13,6 @@ final class ItemSets
 	{
 	}
 
-	/** Set item id -> the component piece item ids it unpacks into. */
 	private static final Map<Integer, int[]> COMPONENTS = new HashMap<>();
 
 	static
@@ -159,7 +153,7 @@ final class ItemSets
 		return COMPONENTS.containsKey(itemId);
 	}
 
-	/** The component piece item ids for a set, or null if the id is not a known set. */
+	/** Null when the id is not a known set. */
 	static int[] piecesFor(int setItemId)
 	{
 		return COMPONENTS.get(setItemId);

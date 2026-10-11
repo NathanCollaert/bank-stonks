@@ -7,28 +7,22 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * The persisted cost-basis record for a single item id: the list of buy lots (GE fills and
- * manual entries).
- *
- * <p>The current holding is always valued at the <b>most recent</b> purchases (LIFO): to value
- * {@code n} held units we walk the lots newest-first and take {@code n} units, ignoring older
- * lots beyond that. This means selling then rebuying shows the latest buy price (not a blended
- * average), and items that leave and come back (bank/inventory/death/storage) keep their data
- * because lots are never deleted.</p>
+ * Holdings are valued LIFO, against the newest buys, so selling and rebuying shows the new price
+ * rather than a blended average. Lots stay when the item leaves your holdings, so it keeps its
+ * history when it comes back.
  */
 @Data
 @NoArgsConstructor
 public class TrackedItem
 {
-	/** Keep this many lots individually; older ones are merged so storage stays bounded. */
+	/** Bounds the persisted JSON per item. */
 	private static final int MAX_LOTS = 40;
 
 	private List<Lot> lots = new ArrayList<>();
 
 	/**
-	 * A pinned buy. When set, the item is "locked": it is shown regardless of what you currently
-	 * hold and valued at this lot's price/date/quantity instead of the live LIFO holding. It is a
-	 * snapshot copy, so it survives lots being merged or removed. Null means unlocked.
+	 * A copy of the pinned buy, so it survives its lot being merged or removed. While set, the item
+	 * is shown whatever you hold, valued at this lot.
 	 */
 	private Lot lockedLot;
 
@@ -45,7 +39,6 @@ public class TrackedItem
 		return lockedLot != null;
 	}
 
-	/** Locks the item to its most recent buy. No-op if there are no lots. */
 	public void lockToNewest()
 	{
 		Lot newest = null;
@@ -62,12 +55,11 @@ public class TrackedItem
 		}
 	}
 
-	/** Locks the item to a specific buy (matched by quantity, spent and date). */
 	public void lockToLot(int quantity, long spent, long epochMs)
 	{
 		for (Lot lot : lots)
 		{
-			if (lot.getQuantity() == quantity && lot.getSpent() == spent && lot.getEpochMs() == epochMs)
+			if (lot.matches(quantity, spent, epochMs))
 			{
 				lockedLot = copy(lot);
 				return;
@@ -85,29 +77,23 @@ public class TrackedItem
 		return new Lot(lot.getQuantity(), lot.getSpent(), lot.getEpochMs(), lot.getOfferId());
 	}
 
-	/** Records a standalone buy (e.g. a manual entry) as a new lot. */
 	public void addBuy(int quantity, long spent, long epochMs)
 	{
 		if (quantity <= 0 || spent <= 0)
 		{
 			return;
 		}
-		lots.add(new Lot(quantity, spent, epochMs, 0));
+		lots.add(new Lot(quantity, spent, epochMs, Lot.NO_OFFER));
 		compact();
 	}
 
-	/**
-	 * Adds a GE fill to the lot for {@code offerId}, so partial fills of one offer accumulate
-	 * into a single lot (showing the offer's overall average price). Creates the lot on the
-	 * first fill.
-	 */
 	public void addOfferFill(long offerId, int quantity, long spent, long epochMs)
 	{
 		if (quantity <= 0 || spent <= 0)
 		{
 			return;
 		}
-		if (offerId != 0)
+		if (offerId != Lot.NO_OFFER)
 		{
 			for (Lot lot : lots)
 			{
@@ -123,7 +109,6 @@ public class TrackedItem
 		compact();
 	}
 
-	/** Total quantity ever bought (sum of all lots). */
 	public int totalBought()
 	{
 		int total = 0;
@@ -134,11 +119,6 @@ public class TrackedItem
 		return total;
 	}
 
-	/**
-	 * Values the most recent {@code quantity} held units (LIFO): walks lots newest-first,
-	 * taking units until {@code quantity} is covered. Returns the average price of those units
-	 * and the most recent buy date among them (the "held since").
-	 */
 	public LotValuation value(int quantity)
 	{
 		if (quantity <= 0 || lots.isEmpty())
@@ -150,27 +130,25 @@ public class TrackedItem
 
 		long cost = 0;
 		int taken = 0;
-		long lastBuyEpochMs = 0;
+		long heldSinceEpochMs = 0;
 		for (Lot lot : newestFirst)
 		{
 			if (taken >= quantity)
 			{
 				break;
 			}
-			if (lastBuyEpochMs == 0)
+			if (heldSinceEpochMs == 0)
 			{
-				// "Held since" is the most recent buy that makes up the current holding.
-				lastBuyEpochMs = lot.getEpochMs();
+				heldSinceEpochMs = lot.getEpochMs();
 			}
 			int take = Math.min(quantity - taken, lot.getQuantity());
 			cost += lot.unitPrice() * take;
 			taken += take;
 		}
 		long average = taken > 0 ? cost / taken : 0;
-		return new LotValuation(average, lastBuyEpochMs);
+		return new LotValuation(average, heldSinceEpochMs);
 	}
 
-	/** Merges the oldest lots together until at most {@link #MAX_LOTS} remain. */
 	private void compact()
 	{
 		if (lots.size() <= MAX_LOTS)
@@ -182,9 +160,8 @@ public class TrackedItem
 		{
 			Lot a = lots.remove(0);
 			Lot b = lots.remove(0);
-			// Merged history loses its offer identity (0) so it is never appended to again.
 			lots.add(0, new Lot(a.getQuantity() + b.getQuantity(), a.getSpent() + b.getSpent(),
-				Math.min(a.getEpochMs(), b.getEpochMs()), 0));
+				Math.min(a.getEpochMs(), b.getEpochMs()), Lot.NO_OFFER));
 		}
 	}
 }

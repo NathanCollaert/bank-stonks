@@ -5,27 +5,22 @@ import java.util.Map;
 import lombok.Data;
 
 /**
- * The full persisted state for one account. Serialized to the RuneLite config as JSON.
- *
- * <p>The block list is not stored here — it lives in the plugin config (global, editable in
- * settings) as item names.</p>
+ * Saved as JSON with Gson: the field names here and in the classes it holds are the stored keys,
+ * so renaming one loses that data for every existing user.
  */
 @Data
 public class PortfolioData
 {
-	/** Cost-basis records keyed by item id. */
 	private Map<Integer, TrackedItem> items = new HashMap<>();
 
-	/** Last-seen bank quantity keyed by item id. */
+	/** Item id to quantity, as of the last time the bank was open. */
 	private Map<Integer, Integer> bank = new HashMap<>();
 
-	/** Last-seen GE offer state keyed by slot index (0-7). */
 	private Map<Integer, SlotState> slots = new HashMap<>();
 
-	/** Monotonic counter for assigning lot ids to GE offers. */
+	/** The last offer id handed out, not the next one. */
 	private long nextLotId;
 
-	/** Guards against null maps after deserializing older/partial JSON. */
 	public void ensureInitialized()
 	{
 		if (items == null)

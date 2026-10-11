@@ -23,15 +23,7 @@ import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.ItemMapping;
 import net.runelite.client.game.ItemVariationMapping;
 
-/**
- * Owns the portfolio state for the currently logged-in account: cost basis per item,
- * last-seen bank quantities and GE slot states. Handles load/save to the RuneLite config
- * and computes the display rows.
- *
- * <p>All reads/writes happen from either the client thread (GE/bank events, row computation)
- * or the config-manager threads; the underlying maps are only touched from the client thread
- * so no extra synchronization is needed for the MVP.</p>
- */
+/** Not thread-safe: use it from the client thread only. */
 @Slf4j
 @Singleton
 public class PortfolioManager
@@ -52,7 +44,7 @@ public class PortfolioManager
 		this.gson = gson;
 	}
 
-	/** Switches to the given account, loading its persisted data. No-op if unchanged. */
+	/** Loads the account's saved portfolio, unless it is already the current account. */
 	public void setAccount(long hash)
 	{
 		if (hash == accountHash)
@@ -108,8 +100,6 @@ public class PortfolioManager
 		configManager.setConfiguration(CONFIG_GROUP, DATA_KEY_PREFIX + accountHash, gson.toJson(data));
 	}
 
-	// ---- GE slot bookkeeping -------------------------------------------------
-
 	public SlotState getSlot(int slot)
 	{
 		return data.getSlots().get(slot);
@@ -125,13 +115,7 @@ public class PortfolioManager
 		data.getSlots().remove(slot);
 	}
 
-	// ---- cost basis ----------------------------------------------------------
-
-	/**
-	 * Records a manual buy as a standalone lot.
-	 *
-	 * @param heldSinceEpochMs the purchase time for this lot; if &le; 0 the current time is used.
-	 */
+	/** @param heldSinceEpochMs 0 or less means now */
 	public void recordBuy(int itemId, int quantity, long spent, long heldSinceEpochMs)
 	{
 		if (quantity <= 0 || spent <= 0)
@@ -142,7 +126,6 @@ public class PortfolioManager
 		data.getItems().computeIfAbsent(itemId, id -> new TrackedItem()).addBuy(quantity, spent, epochMs);
 	}
 
-	/** Records a GE fill, grouping the partial fills of one offer into a single lot. */
 	public void recordOfferFill(int itemId, int quantity, long spent, long epochMs, long offerId)
 	{
 		if (quantity <= 0 || spent <= 0)
@@ -152,7 +135,6 @@ public class PortfolioManager
 		data.getItems().computeIfAbsent(itemId, id -> new TrackedItem()).addOfferFill(offerId, quantity, spent, epochMs);
 	}
 
-	/** Returns a fresh lot id for a newly-seen GE offer. */
 	public long nextOfferId()
 	{
 		long id = data.getNextLotId() + 1;
@@ -165,19 +147,13 @@ public class PortfolioManager
 		return data.getItems().get(itemId);
 	}
 
-	/**
-	 * Deletes an item's tracked data ("untrack"). It disappears from the list and will only
-	 * reappear, freshly, if it is bought again.
-	 */
+	/** Deletes the item's buy history, so it only comes back with a new buy. */
 	public void removeItem(int itemId)
 	{
 		data.getItems().remove(itemId);
 	}
 
-	/**
-	 * Removes a single buy lot (matched by quantity, spent and date). If it was the last lot,
-	 * the whole item is dropped.
-	 */
+	/** Removing the last lot untracks the item. */
 	public void removeLot(int itemId, int quantity, long spent, long epochMs)
 	{
 		TrackedItem tracked = data.getItems().get(itemId);
@@ -188,8 +164,7 @@ public class PortfolioManager
 		List<Lot> lots = tracked.getLots();
 		for (int i = 0; i < lots.size(); i++)
 		{
-			Lot lot = lots.get(i);
-			if (lot.getQuantity() == quantity && lot.getSpent() == spent && lot.getEpochMs() == epochMs)
+			if (lots.get(i).matches(quantity, spent, epochMs))
 			{
 				lots.remove(i);
 				break;
@@ -201,7 +176,6 @@ public class PortfolioManager
 		}
 	}
 
-	/** Locks an item to its most recent buy (pinning it, shown regardless of holdings). */
 	public void lockItem(int itemId)
 	{
 		TrackedItem tracked = data.getItems().get(itemId);
@@ -211,7 +185,6 @@ public class PortfolioManager
 		}
 	}
 
-	/** Locks an item to a specific buy (matched by quantity, spent and date). */
 	public void lockLot(int itemId, int quantity, long spent, long epochMs)
 	{
 		TrackedItem tracked = data.getItems().get(itemId);
@@ -221,7 +194,6 @@ public class PortfolioManager
 		}
 	}
 
-	/** Removes the lock from an item. */
 	public void unlockItem(int itemId)
 	{
 		TrackedItem tracked = data.getItems().get(itemId);
@@ -231,44 +203,35 @@ public class PortfolioManager
 		}
 	}
 
-	/**
-	 * The tradeable "base" item ids a held item counts towards. Uses RuneLite's {@link ItemMapping}
-	 * (the same data {@link ItemManager#getItemPrice} sums) so a combination item resolves to the
-	 * tradeable parts it was assembled from (e.g. an avernic defender counts as its hilt), then
-	 * normalises through {@link ItemVariationMapping} for charged/dose variants.
-	 *
-	 * <p>Only single-quantity components are followed, so assembled parts (hilts, shards, ornament
-	 * kits) count but consumed bulk charges (scales, darts) do not resurrect as "held".</p>
-	 */
-	/** Adds a held item's quantity to every tradeable base it counts towards. */
 	private static void addHeld(Map<Integer, Integer> heldByBase, int itemId, int quantity)
 	{
-		for (int base : representedBases(itemId))
+		for (int base : tradeableBasesOf(itemId))
 		{
 			heldByBase.merge(base, quantity, Integer::sum);
 		}
 	}
 
+	private static final int AVERNIC_DEFENDER = 22322;
+	private static final int AVERNIC_DEFENDER_HILT = 22477;
+
 	/**
-	 * Assembled items that RuneLite has no price for and does not model in {@link ItemMapping}
-	 * (the finished item is untradeable), mapped to the tradeable component you actually bought.
-	 * Lets a held avernic defender count as its hilt, etc. Hand maintained; add entries as needed.
+	 * Untradeable assembled items that {@link ItemMapping} does not cover, mapped to the tradeable
+	 * parts they are made from.
 	 */
 	private static final Map<Integer, int[]> ASSEMBLED_COMPONENTS = new HashMap<>();
 
 	static
 	{
-		// Others (amulet of blood fury, ferocious gloves, etc.) are already resolved by ItemMapping.
-		ASSEMBLED_COMPONENTS.put(22322, new int[]{22477}); // Avernic defender -> Avernic defender hilt
+		ASSEMBLED_COMPONENTS.put(AVERNIC_DEFENDER, new int[]{AVERNIC_DEFENDER_HILT});
 	}
 
-	private static Set<Integer> representedBases(int itemId)
+	private static Set<Integer> tradeableBasesOf(int itemId)
 	{
 		Set<Integer> bases = new HashSet<>();
-		int[] manual = ASSEMBLED_COMPONENTS.get(itemId);
-		if (manual != null)
+		int[] components = ASSEMBLED_COMPONENTS.get(itemId);
+		if (components != null)
 		{
-			for (int component : manual)
+			for (int component : components)
 			{
 				bases.add(ItemVariationMapping.map(component));
 			}
@@ -279,7 +242,7 @@ public class PortfolioManager
 		{
 			for (ItemMapping mapping : mappings)
 			{
-				if (mapping.getQuantity() == 1)
+				if (isAssembledPart(mapping))
 				{
 					bases.add(ItemVariationMapping.map(mapping.getTradeableItem()));
 				}
@@ -292,18 +255,20 @@ public class PortfolioManager
 		return bases;
 	}
 
-	/**
-	 * Finds the tracked (bought) item id that corresponds to an item sitting in the bank,
-	 * matching across variations and combination items so a charged, banked or assembled item
-	 * resolves to the item it was bought as. Returns -1 if nothing tracked corresponds.
-	 */
+	/** Excludes bulk charges (scales, darts): they get used up, so they must not count as held. */
+	private static boolean isAssembledPart(ItemMapping mapping)
+	{
+		return mapping.getQuantity() == 1;
+	}
+
+	/** Matches across variants and assembled items; -1 when nothing tracked matches. */
 	public int boughtIdForBankItem(int bankItemId)
 	{
 		if (data.getItems().containsKey(bankItemId))
 		{
 			return bankItemId;
 		}
-		Set<Integer> bases = representedBases(bankItemId);
+		Set<Integer> bases = tradeableBasesOf(bankItemId);
 		for (Integer id : data.getItems().keySet())
 		{
 			if (bases.contains(ItemVariationMapping.map(id)))
@@ -314,25 +279,16 @@ public class PortfolioManager
 		return -1;
 	}
 
-	/**
-	 * Whether an item is on the untracked list and should be excluded. Supports {@code *}
-	 * wildcards. Single source of truth used by the panel, buy tracker and bank overlay.
-	 */
 	public static boolean isBlocked(BankStonksConfig config, String itemName)
 	{
 		return BlockLists.matches(config.blockList(), itemName);
 	}
-
-	// ---- bank ----------------------------------------------------------------
 
 	public void updateBank(Map<Integer, Integer> bankQuantities)
 	{
 		data.setBank(bankQuantities);
 	}
 
-	// ---- display -------------------------------------------------------------
-
-	/** Total profit/loss across all held items from the last {@link #buildRows} call. */
 	private volatile long lastTotalProfit;
 
 	public long getLastTotalProfit()
@@ -340,36 +296,58 @@ public class PortfolioManager
 		return lastTotalProfit;
 	}
 
-	/**
-	 * Net value of one item after the 2% GE sell tax (floored, capped at 5M per item).
-	 * Items priced under 50 are tax-exempt. Buys are never taxed, so this only ever adjusts
-	 * the current price side of the profit calculation.
-	 */
+	private static final double GE_TAX_RATE = 0.02;
+	private static final long GE_TAX_CAP_PER_ITEM = 5_000_000L;
+	private static final long GE_TAX_FREE_BELOW = 50;
+
+	/** Buys are never taxed, so only the selling side of a profit goes through this. */
 	public static long netAfterTax(long price)
 	{
-		if (price < 50)
+		if (price < GE_TAX_FREE_BELOW)
 		{
 			return price;
 		}
-		long tax = Math.min((long) Math.floor(price * 0.02), 5_000_000L);
+		long tax = Math.min((long) Math.floor(price * GE_TAX_RATE), GE_TAX_CAP_PER_ITEM);
 		return price - tax;
 	}
 
 	/**
-	 * Builds the rows to render. Held quantity is min(totalBought, held) so that items
-	 * obtained outside the GE (drops, etc.) are never valued as profit, and sold-off stock
-	 * drops out automatically.
-	 *
-	 * <p>Held counts the bank snapshot plus the live inventory/equipment quantities passed in
-	 * (an item is only ever in one container, so there is no double counting).</p>
-	 *
-	 * <p>Must be called on the client thread (uses {@link ItemManager}).</p>
+	 * Values at most the amount bought, so items got outside the GE (drops etc.) never count as
+	 * profit, and sold stock drops out. Held is the bank snapshot plus {@code liveQuantities}: an
+	 * item is only ever in one of them, so nothing counts twice.
 	 */
 	public List<PortfolioRow> buildRows(ItemManager itemManager, BankStonksConfig config, Map<Integer, Integer> liveQuantities)
 	{
-		// Total held quantity grouped by variation base, so a charged/banked item counts
-		// towards the uncharged item it was bought as (and dose variants collapse together).
-		// Bank is a cached snapshot; inventory and worn items are live.
+		Map<Integer, Integer> heldByBase = heldQuantitiesByBase(liveQuantities);
+		List<PortfolioRow> rows = lockedRows(itemManager, config);
+		rows.addAll(heldRows(itemManager, config, heldByBase));
+		sort(rows, config.sortOrder());
+		lastTotalProfit = totalProfit(rows);
+		return rows;
+	}
+
+	/** Cheap (no pricing), so it can be compared every tick to tell whether tracked holdings changed. */
+	public Map<Integer, Integer> trackedHeldSignature(Map<Integer, Integer> liveQuantities)
+	{
+		if (data.getItems().isEmpty())
+		{
+			return new HashMap<>();
+		}
+		Map<Integer, Integer> held = heldQuantitiesByBase(liveQuantities);
+		Map<Integer, Integer> signature = new HashMap<>();
+		for (Integer base : trackedBasesWithSetPieces())
+		{
+			int quantity = held.getOrDefault(base, 0);
+			if (quantity != 0)
+			{
+				signature.put(base, quantity);
+			}
+		}
+		return signature;
+	}
+
+	private Map<Integer, Integer> heldQuantitiesByBase(Map<Integer, Integer> liveQuantities)
+	{
 		Map<Integer, Integer> heldByBase = new HashMap<>();
 		for (Map.Entry<Integer, Integer> e : data.getBank().entrySet())
 		{
@@ -382,12 +360,72 @@ public class PortfolioManager
 				addHeld(heldByBase, e.getKey(), e.getValue());
 			}
 		}
+		return heldByBase;
+	}
 
-		// Attribute held items to purchases most-recent first, so a newer buy claims the held units
-		// before an older one. This resolves the ambiguity when the same items could satisfy either
-		// a set purchase or individual-piece purchases: whichever you bought more recently wins
-		// (consistent with the LIFO cost basis). A set claims un-unpacked set items plus complete
-		// sets assembled from loose pieces, then consumes those pieces so nothing double counts.
+	private Set<Integer> trackedBasesWithSetPieces()
+	{
+		Set<Integer> bases = new HashSet<>();
+		for (Integer id : data.getItems().keySet())
+		{
+			bases.add(ItemVariationMapping.map(id));
+			int[] pieces = ItemSets.piecesFor(id);
+			if (pieces != null)
+			{
+				for (int piece : pieces)
+				{
+					bases.add(ItemVariationMapping.map(piece));
+				}
+			}
+		}
+		return bases;
+	}
+
+	private List<PortfolioRow> lockedRows(ItemManager itemManager, BankStonksConfig config)
+	{
+		List<PortfolioRow> rows = new ArrayList<>();
+		for (Map.Entry<Integer, TrackedItem> entry : data.getItems().entrySet())
+		{
+			TrackedItem tracked = entry.getValue();
+			if (!tracked.isLocked())
+			{
+				continue;
+			}
+			int itemId = entry.getKey();
+			if (!isBlocked(config, itemManager.getItemComposition(itemId).getName()))
+			{
+				rows.add(buildLockedRow(itemManager, config, itemId, tracked));
+			}
+		}
+		return rows;
+	}
+
+	private List<PortfolioRow> heldRows(ItemManager itemManager, BankStonksConfig config, Map<Integer, Integer> heldByBase)
+	{
+		List<PortfolioRow> rows = new ArrayList<>();
+		for (Map.Entry<Integer, TrackedItem> entry : unlockedNewestBuyFirst())
+		{
+			int itemId = entry.getKey();
+			TrackedItem tracked = entry.getValue();
+			if (isBlocked(config, itemManager.getItemComposition(itemId).getName()))
+			{
+				continue;
+			}
+			int quantity = claimHeld(heldByBase, itemId, tracked.totalBought());
+			if (quantity > 0)
+			{
+				rows.add(buildRow(itemManager, config, itemId, tracked, quantity));
+			}
+		}
+		return rows;
+	}
+
+	/**
+	 * Newest buy first, so when held items could belong to either a set or its loose pieces, the
+	 * more recent purchase claims them, as with the LIFO cost basis.
+	 */
+	private List<Map.Entry<Integer, TrackedItem>> unlockedNewestBuyFirst()
+	{
 		List<Map.Entry<Integer, TrackedItem>> claims = new ArrayList<>();
 		for (Map.Entry<Integer, TrackedItem> entry : data.getItems().entrySet())
 		{
@@ -398,142 +436,65 @@ public class PortfolioManager
 		}
 		claims.sort((a, b) ->
 		{
-			int cmp = Long.compare(newestBuy(b.getValue()), newestBuy(a.getValue()));
+			int cmp = Long.compare(newestBuyEpochMs(b.getValue()), newestBuyEpochMs(a.getValue()));
 			return cmp != 0 ? cmp : Integer.compare(a.getKey(), b.getKey());
 		});
-
-		List<PortfolioRow> rows = new ArrayList<>();
-		long total = 0;
-
-		// Locked items are pinned to one buy: always shown, valued at that lot's price/date/quantity,
-		// and excluded from the held-pool allocation below (their quantity is the locked lot's, not
-		// what you currently hold).
-		for (Map.Entry<Integer, TrackedItem> entry : data.getItems().entrySet())
-		{
-			TrackedItem tracked = entry.getValue();
-			if (!tracked.isLocked())
-			{
-				continue;
-			}
-			int itemId = entry.getKey();
-			if (isBlocked(config, itemManager.getItemComposition(itemId).getName()))
-			{
-				continue;
-			}
-			PortfolioRow row = buildLockedRow(itemManager, config, itemId, tracked);
-			rows.add(row);
-			total += row.getProfitTotal();
-		}
-
-		for (Map.Entry<Integer, TrackedItem> entry : claims)
-		{
-			int itemId = entry.getKey();
-			TrackedItem tracked = entry.getValue();
-			if (isBlocked(config, itemManager.getItemComposition(itemId).getName()))
-			{
-				continue;
-			}
-
-			int quantity;
-			int[] pieces = ItemSets.piecesFor(itemId);
-			if (pieces != null)
-			{
-				int unopened = heldByBase.getOrDefault(ItemVariationMapping.map(itemId), 0);
-				int completeSets = Integer.MAX_VALUE;
-				for (int piece : pieces)
-				{
-					completeSets = Math.min(completeSets, heldByBase.getOrDefault(ItemVariationMapping.map(piece), 0));
-				}
-				int heldSets = unopened + (completeSets == Integer.MAX_VALUE ? 0 : completeSets);
-				quantity = Math.min(tracked.totalBought(), heldSets);
-				if (quantity <= 0)
-				{
-					continue;
-				}
-				int fromUnopened = Math.min(quantity, unopened);
-				consume(heldByBase, ItemVariationMapping.map(itemId), fromUnopened);
-				int fromPieces = quantity - fromUnopened;
-				for (int piece : pieces)
-				{
-					consume(heldByBase, ItemVariationMapping.map(piece), fromPieces);
-				}
-			}
-			else
-			{
-				int base = ItemVariationMapping.map(itemId);
-				// The list only shows what you currently hold (bank + inventory + gear); items you
-				// have none of drop off until they come back.
-				quantity = Math.min(tracked.totalBought(), heldByBase.getOrDefault(base, 0));
-				if (quantity <= 0)
-				{
-					continue;
-				}
-				consume(heldByBase, base, quantity);
-			}
-
-			PortfolioRow row = buildRow(itemManager, config, itemId, tracked, quantity);
-			rows.add(row);
-			total += row.getProfitTotal();
-		}
-
-		sort(rows, config.sortOrder());
-		lastTotalProfit = total;
-		return rows;
+		return claims;
 	}
 
-	/**
-	 * A cheap snapshot of the held quantities of just the tracked items (and set pieces), keyed by
-	 * variation base. Used to decide whether an inventory change actually affected the panel, so we
-	 * can skip a full rebuild when it did not. Does no pricing or row building.
-	 */
-	public Map<Integer, Integer> trackedHeldSignature(Map<Integer, Integer> liveQuantities)
+	private static int claimHeld(Map<Integer, Integer> heldByBase, int itemId, int totalBought)
 	{
-		if (data.getItems().isEmpty())
+		int[] pieces = ItemSets.piecesFor(itemId);
+		if (pieces != null)
 		{
-			return new HashMap<>();
+			return claimSet(heldByBase, itemId, pieces, totalBought);
 		}
-
-		Set<Integer> relevant = new HashSet<>();
-		for (Integer id : data.getItems().keySet())
-		{
-			relevant.add(ItemVariationMapping.map(id));
-			int[] pieces = ItemSets.piecesFor(id);
-			if (pieces != null)
-			{
-				for (int piece : pieces)
-				{
-					relevant.add(ItemVariationMapping.map(piece));
-				}
-			}
-		}
-
-		Map<Integer, Integer> held = new HashMap<>();
-		for (Map.Entry<Integer, Integer> e : data.getBank().entrySet())
-		{
-			addHeld(held, e.getKey(), e.getValue());
-		}
-		if (liveQuantities != null)
-		{
-			for (Map.Entry<Integer, Integer> e : liveQuantities.entrySet())
-			{
-				addHeld(held, e.getKey(), e.getValue());
-			}
-		}
-
-		Map<Integer, Integer> signature = new HashMap<>();
-		for (Integer base : relevant)
-		{
-			int quantity = held.getOrDefault(base, 0);
-			if (quantity != 0)
-			{
-				signature.put(base, quantity);
-			}
-		}
-		return signature;
+		int base = ItemVariationMapping.map(itemId);
+		int quantity = Math.min(totalBought, heldByBase.getOrDefault(base, 0));
+		consume(heldByBase, base, quantity);
+		return quantity;
 	}
 
-	/** The most recent buy date across a tracked item's lots (0 if none). */
-	private static long newestBuy(TrackedItem tracked)
+	private static int claimSet(Map<Integer, Integer> heldByBase, int setItemId, int[] pieces, int totalBought)
+	{
+		int setBase = ItemVariationMapping.map(setItemId);
+		int unopened = heldByBase.getOrDefault(setBase, 0);
+		int quantity = Math.min(totalBought, unopened + completeSets(heldByBase, pieces));
+		if (quantity <= 0)
+		{
+			return quantity;
+		}
+		int fromUnopened = Math.min(quantity, unopened);
+		consume(heldByBase, setBase, fromUnopened);
+		int fromPieces = quantity - fromUnopened;
+		for (int piece : pieces)
+		{
+			consume(heldByBase, ItemVariationMapping.map(piece), fromPieces);
+		}
+		return quantity;
+	}
+
+	private static int completeSets(Map<Integer, Integer> heldByBase, int[] pieces)
+	{
+		int completeSets = Integer.MAX_VALUE;
+		for (int piece : pieces)
+		{
+			completeSets = Math.min(completeSets, heldByBase.getOrDefault(ItemVariationMapping.map(piece), 0));
+		}
+		return completeSets == Integer.MAX_VALUE ? 0 : completeSets;
+	}
+
+	private static long totalProfit(List<PortfolioRow> rows)
+	{
+		long total = 0;
+		for (PortfolioRow row : rows)
+		{
+			total += row.getProfitTotal();
+		}
+		return total;
+	}
+
+	private static long newestBuyEpochMs(TrackedItem tracked)
 	{
 		long newest = 0;
 		for (Lot lot : tracked.getLots())
@@ -546,7 +507,6 @@ public class PortfolioManager
 		return newest;
 	}
 
-	/** Removes up to {@code amount} of a base from the held pool. */
 	private static void consume(Map<Integer, Integer> heldByBase, int base, int amount)
 	{
 		if (amount <= 0)
@@ -564,7 +524,6 @@ public class PortfolioManager
 		}
 	}
 
-	/** Builds one display row for {@code quantity} held units of a tracked item, valued LIFO. */
 	private PortfolioRow buildRow(ItemManager itemManager, BankStonksConfig config, int itemId, TrackedItem tracked, int quantity)
 	{
 		LotValuation valuation = tracked.value(quantity);
@@ -581,7 +540,6 @@ public class PortfolioManager
 		return new PortfolioRow(itemId, name, quantity, avg, rawCurrent, profitEach, profitTotal, valuation.getHeldSinceEpochMs(), lots, false);
 	}
 
-	/** Builds a pinned row for a locked item, valued at its locked lot's price, date and quantity. */
 	private PortfolioRow buildLockedRow(ItemManager itemManager, BankStonksConfig config, int itemId, TrackedItem tracked)
 	{
 		Lot locked = tracked.getLockedLot();
@@ -592,10 +550,9 @@ public class PortfolioManager
 		long profitEach = effectiveCurrent - avg;
 		long profitTotal = profitEach * quantity;
 
-		// A locked item shows no history dropdown (empty lots); the underlying lots are still kept
-		// and updated, and are restored when it is unlocked.
+		List<Lot> hiddenHistory = new ArrayList<>();
 		String name = itemManager.getItemComposition(itemId).getName();
-		return new PortfolioRow(itemId, name, quantity, avg, rawCurrent, profitEach, profitTotal, locked.getEpochMs(), new ArrayList<>(), true);
+		return new PortfolioRow(itemId, name, quantity, avg, rawCurrent, profitEach, profitTotal, locked.getEpochMs(), hiddenHistory, true);
 	}
 
 	private static void sort(List<PortfolioRow> rows, SortOrder order)

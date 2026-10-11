@@ -6,18 +6,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
-/**
- * Helpers for the comma-separated item-name list stored in config (the "Block list").
- *
- * <p>Matching is case-insensitive. An entry may contain {@code *} as a wildcard matching any
- * run of characters, so {@code prayer potion*} matches every dose ("Prayer potion(1)"…), and
- * {@code *(unf)} matches every unfinished potion.</p>
- *
- * <p>Patterns are compiled once and cached per CSV value, since {@link #matches} is called
- * frequently (per item, and per bank item each render frame).</p>
- */
 final class BlockLists
 {
+	// Compiled once per CSV value: matches() runs for bank items on every frame.
 	private static volatile String cachedCsv;
 	private static volatile List<Pattern> cachedPatterns = Collections.emptyList();
 
@@ -25,7 +16,6 @@ final class BlockLists
 	{
 	}
 
-	/** Splits a CSV config value into trimmed, non-empty entries (original case preserved). */
 	static List<String> names(String csv)
 	{
 		List<String> out = new ArrayList<>();
@@ -44,7 +34,6 @@ final class BlockLists
 		return out;
 	}
 
-	/** Whether the item name matches any entry in the list (supporting {@code *} wildcards). */
 	static boolean matches(String csv, String itemName)
 	{
 		if (itemName == null)
@@ -84,14 +73,12 @@ final class BlockLists
 		return patterns;
 	}
 
+	/** A wildcard entry matches anywhere in the name, so "* potion" also catches "Prayer potion(4)". */
 	private static Pattern toPattern(String entry)
 	{
-		// Entries with a wildcard match as "contains" (unanchored), so "* potion" also
-		// matches "Divine super combat potion(4)". Entries without a wildcard are anchored,
-		// so they only match the exact item name.
-		boolean wildcard = entry.indexOf('*') >= 0;
+		boolean exactNameOnly = entry.indexOf('*') < 0;
 		StringBuilder regex = new StringBuilder();
-		if (!wildcard)
+		if (exactNameOnly)
 		{
 			regex.append('^');
 		}
@@ -107,14 +94,13 @@ final class BlockLists
 				regex.append(Pattern.quote(parts[i]));
 			}
 		}
-		if (!wildcard)
+		if (exactNameOnly)
 		{
 			regex.append('$');
 		}
 		return Pattern.compile(regex.toString());
 	}
 
-	/** Returns the CSV with {@code name} appended, or unchanged if already present. */
 	static String add(String csv, String name)
 	{
 		List<String> names = names(csv);
@@ -129,7 +115,6 @@ final class BlockLists
 		return String.join(", ", names);
 	}
 
-	/** Returns the CSV with {@code name} removed (exact, case-insensitive). */
 	static String remove(String csv, String name)
 	{
 		List<String> names = names(csv);
